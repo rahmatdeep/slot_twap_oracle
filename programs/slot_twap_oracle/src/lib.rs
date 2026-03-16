@@ -5,6 +5,7 @@ pub mod events;
 pub mod instructions;
 pub mod math;
 pub mod state;
+pub mod utils;
 
 use instructions::*;
 
@@ -18,8 +19,9 @@ pub mod slot_twap_oracle {
         ctx: Context<InitializeOracle>,
         base_mint: Pubkey,
         quote_mint: Pubkey,
+        capacity: u32,
     ) -> Result<()> {
-        instructions::initialize_oracle::handler(ctx, base_mint, quote_mint)
+        instructions::initialize_oracle::handler(ctx, base_mint, quote_mint, capacity)
     }
 
     pub fn update_price(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
