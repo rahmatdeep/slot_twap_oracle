@@ -35,8 +35,8 @@ export type SlotTwapOracle = {
           pda: {
             seeds: [
               { kind: "const"; value: [111, 114, 97, 99, 108, 101] },
-              { kind: "arg"; path: "baseMint" },
-              { kind: "arg"; path: "quoteMint" }
+              { kind: "account"; path: "baseMint" },
+              { kind: "account"; path: "quoteMint" }
             ];
           };
         },
@@ -50,20 +50,23 @@ export type SlotTwapOracle = {
             ];
           };
         },
-        { name: "payer"; writable: true; signer: true },
+        { name: "baseMint" },
+        { name: "quoteMint" },
+        { name: "authority"; writable: true; signer: true },
         { name: "systemProgram"; address: "11111111111111111111111111111111" }
       ];
-      args: [
-        { name: "baseMint"; type: "pubkey" },
-        { name: "quoteMint"; type: "pubkey" },
-        { name: "capacity"; type: "u32" }
-      ];
+      args: [{ name: "capacity"; type: "u32" }];
     },
     {
       name: "updatePrice";
       discriminator: [61, 34, 117, 155, 75, 34, 123, 208];
       accounts: [
-        { name: "oracle"; writable: true; relations: ["observationBuffer"] },
+        { name: "authority"; signer: true; relations: ["oracle"] },
+        {
+          name: "oracle";
+          writable: true;
+          relations: ["observationBuffer"];
+        },
         {
           name: "observationBuffer";
           writable: true;
@@ -87,7 +90,9 @@ export type SlotTwapOracle = {
     { code: 6000; name: "priceOverflow"; msg: "Price overflow detected" },
     { code: 6001; name: "staleSlot"; msg: "Stale oracle update — slot has not advanced" },
     { code: 6002; name: "insufficientObservations"; msg: "Not enough observations to compute SWAP for the requested window" },
-    { code: 6003; name: "divisionByZero"; msg: "Division by zero — slot span is zero" }
+    { code: 6003; name: "divisionByZero"; msg: "Division by zero — slot span is zero" },
+    { code: 6004; name: "invalidCapacity"; msg: "Observation buffer capacity must be greater than zero" },
+    { code: 6005; name: "insufficientHistory"; msg: "Not enough observations to compute swap for requested window" }
   ];
   types: [
     {
@@ -117,12 +122,12 @@ export type SlotTwapOracle = {
       type: {
         kind: "struct";
         fields: [
+          { name: "authority"; type: "pubkey" },
           { name: "baseMint"; type: "pubkey" },
           { name: "quoteMint"; type: "pubkey" },
           { name: "lastPrice"; type: "u128" },
           { name: "cumulativePrice"; type: "u128" },
-          { name: "lastSlot"; type: "u64" },
-          { name: "bump"; type: "u8" }
+          { name: "lastSlot"; type: "u64" }
         ];
       };
     },
@@ -177,8 +182,8 @@ export const IDL: SlotTwapOracle = {
           pda: {
             seeds: [
               { kind: "const", value: [111, 114, 97, 99, 108, 101] },
-              { kind: "arg", path: "baseMint" },
-              { kind: "arg", path: "quoteMint" },
+              { kind: "account", path: "baseMint" },
+              { kind: "account", path: "quoteMint" },
             ],
           },
         },
@@ -192,20 +197,23 @@ export const IDL: SlotTwapOracle = {
             ],
           },
         },
-        { name: "payer", writable: true, signer: true },
+        { name: "baseMint" },
+        { name: "quoteMint" },
+        { name: "authority", writable: true, signer: true },
         { name: "systemProgram", address: "11111111111111111111111111111111" },
       ],
-      args: [
-        { name: "baseMint", type: "pubkey" },
-        { name: "quoteMint", type: "pubkey" },
-        { name: "capacity", type: "u32" },
-      ],
+      args: [{ name: "capacity", type: "u32" }],
     },
     {
       name: "updatePrice",
       discriminator: [61, 34, 117, 155, 75, 34, 123, 208],
       accounts: [
-        { name: "oracle", writable: true, relations: ["observationBuffer"] },
+        { name: "authority", signer: true, relations: ["oracle"] },
+        {
+          name: "oracle",
+          writable: true,
+          relations: ["observationBuffer"],
+        },
         {
           name: "observationBuffer",
           writable: true,
@@ -230,6 +238,8 @@ export const IDL: SlotTwapOracle = {
     { code: 6001, name: "staleSlot", msg: "Stale oracle update — slot has not advanced" },
     { code: 6002, name: "insufficientObservations", msg: "Not enough observations to compute SWAP for the requested window" },
     { code: 6003, name: "divisionByZero", msg: "Division by zero — slot span is zero" },
+    { code: 6004, name: "invalidCapacity", msg: "Observation buffer capacity must be greater than zero" },
+    { code: 6005, name: "insufficientHistory", msg: "Not enough observations to compute swap for requested window" },
   ],
   types: [
     {
@@ -259,12 +269,12 @@ export const IDL: SlotTwapOracle = {
       type: {
         kind: "struct",
         fields: [
+          { name: "authority", type: "pubkey" },
           { name: "baseMint", type: "pubkey" },
           { name: "quoteMint", type: "pubkey" },
           { name: "lastPrice", type: "u128" },
           { name: "cumulativePrice", type: "u128" },
           { name: "lastSlot", type: "u64" },
-          { name: "bump", type: "u8" },
         ],
       },
     },

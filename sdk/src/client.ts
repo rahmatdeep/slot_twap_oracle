@@ -1,20 +1,11 @@
 import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
-import {
-  PublicKey,
-  Connection,
-  Keypair,
-  TransactionInstruction,
-  Transaction,
-  sendAndConfirmTransaction,
-  Signer,
-} from "@solana/web3.js";
+import { PublicKey, Signer } from "@solana/web3.js";
 import { IDL, SlotTwapOracle } from "./idl";
 import { findOraclePda, findObservationBufferPda, PROGRAM_ID } from "./pda";
 import {
   OracleAccount,
   ObservationBufferAccount,
   Observation,
-  PriceUpdatedEvent,
 } from "./types";
 
 /**
@@ -53,29 +44,34 @@ export class SlotTwapOracleClient {
     baseMint: PublicKey,
     quoteMint: PublicKey,
     capacity: number,
-    payer: Signer
+    authority: Signer
   ): Promise<string> {
     return this.program.methods
-      .initializeOracle(baseMint, quoteMint, capacity)
-      .accounts({ payer: payer.publicKey })
-      .signers([payer])
+      .initializeOracle(capacity)
+      .accounts({
+        baseMint,
+        quoteMint,
+        authority: authority.publicKey,
+      })
+      .signers([authority])
       .rpc();
   }
 
   async updatePrice(
     oracle: PublicKey,
     newPrice: BN,
-    payer: Signer
+    authority: Signer
   ): Promise<string> {
     const [observationBuffer] = this.findObservationBufferPda(oracle);
 
     return this.program.methods
       .updatePrice(newPrice)
       .accounts({
+        authority: authority.publicKey,
         oracle,
         observationBuffer,
       })
-      .signers([payer])
+      .signers([authority])
       .rpc();
   }
 
