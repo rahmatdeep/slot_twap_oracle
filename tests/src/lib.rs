@@ -43,7 +43,7 @@ mod tests {
     }
 
     fn build_initialize_ix(
-        payer: &Pubkey,
+        authority: &Pubkey,
         base_mint: &Pubkey,
         quote_mint: &Pubkey,
         capacity: u32,
@@ -63,7 +63,7 @@ mod tests {
             accounts: vec![
                 AccountMeta::new(oracle_pda, false),
                 AccountMeta::new(obs_pda, false),
-                AccountMeta::new(*payer, true),
+                AccountMeta::new(*authority, true),
                 AccountMeta::new_readonly(system_program::id(), false),
             ],
             data,
@@ -84,13 +84,18 @@ mod tests {
         }
     }
 
-    fn build_update_price_ix(oracle: &Pubkey, new_price: u128) -> Instruction {
+    fn build_update_price_ix(
+        authority: &Pubkey,
+        oracle: &Pubkey,
+        new_price: u128,
+    ) -> Instruction {
         let (obs_pda, _) = observation_buffer_pda(oracle);
         let data = slot_twap_oracle::instruction::UpdatePrice { new_price }.data();
 
         Instruction {
             program_id: program_id(),
             accounts: vec![
+                AccountMeta::new_readonly(*authority, true),
                 AccountMeta::new(*oracle, false),
                 AccountMeta::new(obs_pda, false),
             ],
@@ -153,17 +158,21 @@ mod tests {
     /// Helper: warp slot, expire blockhash, send update_price
     fn do_update_price(
         svm: &mut LiteSVM,
-        payer: &Keypair,
+        authority: &Keypair,
         oracle_pda: &Pubkey,
         new_price: u128,
         target_slot: u64,
     ) {
         svm.warp_to_slot(target_slot);
         svm.expire_blockhash();
-        let ix = build_update_price_ix(oracle_pda, new_price);
+        let ix = build_update_price_ix(&authority.pubkey(), oracle_pda, new_price);
         let blockhash = svm.latest_blockhash();
-        let tx =
-            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[payer], blockhash);
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&authority.pubkey()),
+            &[authority],
+            blockhash,
+        );
         svm.send_transaction(tx).unwrap();
     }
 
@@ -758,8 +767,46 @@ mod tests {
         do_update_price(&mut svm, &payer, &oracle_pda, 100, init_slot + 10);
 
         // Try updating at the same slot (no warp) — should fail with StaleSlot
-        let ix = build_update_price_ix(&oracle_pda, 200);
+        let ix = build_update_price_ix(&payer.pubkey(), &oracle_pda, 200);
         send_tx_expect_err(&mut svm, &payer, &[ix]);
+    }
+
+    #[test]
+    fn test_update_price_unauthorized_fails() {
+        let mut svm = setup();
+        let authority = Keypair::new();
+        let attacker = Keypair::new();
+        svm.airdrop(&authority.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&attacker.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &authority, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        svm.warp_to_slot(init_slot + 10);
+        svm.expire_blockhash();
+
+        // Attacker tries to update price — should fail because attacker != authority
+        let ix = build_update_price_ix(&attacker.pubkey(), &oracle_pda, 999);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&attacker.pubkey()),
+            &[&attacker],
+            blockhash,
+        );
+        let result = svm.send_transaction(tx);
+        assert!(result.is_err(), "Unauthorized update should fail");
+
+        // Verify oracle was not modified
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 0);
+
+        // Authority can still update
+        do_update_price(&mut svm, &authority, &oracle_pda, 500, init_slot + 10);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 500);
     }
 
     #[test]
@@ -1103,9 +1150,9 @@ mod tests {
 
         // Build three update_price instructions — each touches only its own
         // oracle + observation_buffer accounts. No overlap.
-        let ix_sol = build_update_price_ix(&sol_oracle, 100);
-        let ix_eth = build_update_price_ix(&eth_oracle, 200);
-        let ix_btc = build_update_price_ix(&btc_oracle, 300);
+        let ix_sol = build_update_price_ix(&payer.pubkey(), &sol_oracle, 100);
+        let ix_eth = build_update_price_ix(&payer.pubkey(), &eth_oracle, 200);
+        let ix_btc = build_update_price_ix(&payer.pubkey(), &btc_oracle, 300);
 
         // Send all three in a SINGLE transaction. This succeeds because Solana
         // allows multiple instructions in one tx as long as there are no
@@ -1181,7 +1228,7 @@ mod tests {
         let blockhash = svm.latest_blockhash();
 
         let tx_sol = Transaction::new_signed_with_payer(
-            &[build_update_price_ix(&sol_oracle, 150)],
+            &[build_update_price_ix(&payer.pubkey(), &sol_oracle, 150)],
             Some(&payer.pubkey()),
             &[&payer],
             blockhash,
@@ -1189,7 +1236,7 @@ mod tests {
         svm.send_transaction(tx_sol).unwrap();
 
         let tx_eth = Transaction::new_signed_with_payer(
-            &[build_update_price_ix(&eth_oracle, 2500)],
+            &[build_update_price_ix(&payer.pubkey(), &eth_oracle, 2500)],
             Some(&payer.pubkey()),
             &[&payer],
             blockhash,
@@ -1197,7 +1244,7 @@ mod tests {
         svm.send_transaction(tx_eth).unwrap();
 
         let tx_btc = Transaction::new_signed_with_payer(
-            &[build_update_price_ix(&btc_oracle, 60000)],
+            &[build_update_price_ix(&payer.pubkey(), &btc_oracle, 60000)],
             Some(&payer.pubkey()),
             &[&payer],
             blockhash,
@@ -1243,8 +1290,8 @@ mod tests {
         let blockhash = svm.latest_blockhash();
         let tx = Transaction::new_signed_with_payer(
             &[
-                build_update_price_ix(&sol_oracle, 100),
-                build_update_price_ix(&eth_oracle, 2000),
+                build_update_price_ix(&payer.pubkey(), &sol_oracle, 100),
+                build_update_price_ix(&payer.pubkey(), &eth_oracle, 2000),
             ],
             Some(&payer.pubkey()),
             &[&payer],
@@ -1258,8 +1305,8 @@ mod tests {
         let blockhash = svm.latest_blockhash();
         let tx = Transaction::new_signed_with_payer(
             &[
-                build_update_price_ix(&sol_oracle, 150),
-                build_update_price_ix(&eth_oracle, 2500),
+                build_update_price_ix(&payer.pubkey(), &sol_oracle, 150),
+                build_update_price_ix(&payer.pubkey(), &eth_oracle, 2500),
             ],
             Some(&payer.pubkey()),
             &[&payer],
@@ -1339,7 +1386,7 @@ mod tests {
         for (i, oracle) in oracle_pdas.iter().enumerate() {
             let price = ((i + 1) * 100) as u128; // prices: 100, 200, ..., 5000
             let tx = Transaction::new_signed_with_payer(
-                &[build_update_price_ix(oracle, price)],
+                &[build_update_price_ix(&payer.pubkey(), oracle, price)],
                 Some(&payer.pubkey()),
                 &[&payer],
                 blockhash,
@@ -1385,7 +1432,7 @@ mod tests {
         for (i, oracle) in oracle_pdas.iter().enumerate() {
             let price = ((i + 1) * 200) as u128; // new prices: 200, 400, ..., 10000
             let tx = Transaction::new_signed_with_payer(
-                &[build_update_price_ix(oracle, price)],
+                &[build_update_price_ix(&payer.pubkey(), oracle, price)],
                 Some(&payer.pubkey()),
                 &[&payer],
                 blockhash,

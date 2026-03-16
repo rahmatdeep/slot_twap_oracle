@@ -7,7 +7,7 @@ use crate::state::{ObservationBuffer, Oracle};
 pub struct InitializeOracle<'info> {
     #[account(
         init,
-        payer = payer,
+        payer = authority,
         space = 8 + Oracle::INIT_SPACE,
         seeds = [b"oracle", base_mint.as_ref(), quote_mint.as_ref()],
         bump,
@@ -16,7 +16,7 @@ pub struct InitializeOracle<'info> {
 
     #[account(
         init,
-        payer = payer,
+        payer = authority,
         space = ObservationBuffer::space(capacity),
         seeds = [b"observation", oracle.key().as_ref()],
         bump,
@@ -24,7 +24,7 @@ pub struct InitializeOracle<'info> {
     pub observation_buffer: Account<'info, ObservationBuffer>,
 
     #[account(mut)]
-    pub payer: Signer<'info>,
+    pub authority: Signer<'info>,
 
     pub system_program: Program<'info, System>,
 }
@@ -38,6 +38,7 @@ pub fn handler(
     let oracle = &mut ctx.accounts.oracle;
     let clock = Clock::get()?;
 
+    oracle.authority = ctx.accounts.authority.key();
     oracle.base_mint = base_mint;
     oracle.quote_mint = quote_mint;
     oracle.last_price = 0;

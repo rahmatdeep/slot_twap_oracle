@@ -3,6 +3,7 @@ use anchor_lang::prelude::*;
 #[account]
 #[derive(InitSpace)]
 pub struct Oracle {
+    pub authority: Pubkey,
     pub base_mint: Pubkey,
     pub quote_mint: Pubkey,
     pub last_price: u128,
