@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::OracleError;
+use crate::math::compute_swap;
 use crate::state::{ObservationBuffer, Oracle};
 use crate::utils::get_observation_before_slot;
 
@@ -22,12 +23,8 @@ pub fn handler(ctx: Context<GetSwap>, window_slots: u64) -> Result<u128> {
     let clock = Clock::get()?;
     let current_slot = clock.slot;
 
-    // Latest observation is the most recently written entry
     let len = buffer.observations.len();
     require!(len > 0, OracleError::InsufficientObservations);
-
-    let latest_idx = (buffer.head as usize + len - 1) % len;
-    let latest = &buffer.observations[latest_idx];
 
     // The cumulative_price on the oracle may have advanced beyond the last
     // stored observation if slots have elapsed since the last update_price.
@@ -45,30 +42,18 @@ pub fn handler(ctx: Context<GetSwap>, window_slots: u64) -> Result<u128> {
         )
         .ok_or(OracleError::PriceOverflow)?;
 
-    let slot_now = current_slot;
-
     // Find an observation before the start of the window
     let window_start = current_slot
         .checked_sub(window_slots)
         .ok_or(OracleError::PriceOverflow)?;
 
-    let past_obs =
-        get_observation_before_slot(buffer, window_start + 1).ok_or(OracleError::InsufficientObservations)?;
+    let past_obs = get_observation_before_slot(buffer, window_start + 1)
+        .ok_or(OracleError::InsufficientObservations)?;
 
-    let slot_past = past_obs.slot;
-    let cumulative_past = past_obs.cumulative_price;
-
-    let slot_span = slot_now
-        .checked_sub(slot_past)
-        .ok_or(OracleError::PriceOverflow)?;
-
-    require!(slot_span > 0, OracleError::DivisionByZero);
-
-    let cumulative_delta = cumulative_now
-        .checked_sub(cumulative_past)
-        .ok_or(OracleError::PriceOverflow)?;
-
-    let swap = cumulative_delta / slot_span as u128;
-
-    Ok(swap)
+    compute_swap(
+        cumulative_now,
+        past_obs.cumulative_price,
+        current_slot,
+        past_obs.slot,
+    )
 }
