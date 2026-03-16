@@ -90,9 +90,8 @@ export type SlotTwapOracle = {
     { code: 6000; name: "priceOverflow"; msg: "Price overflow detected" },
     { code: 6001; name: "staleSlot"; msg: "Stale oracle update — slot has not advanced" },
     { code: 6002; name: "insufficientObservations"; msg: "Not enough observations to compute SWAP for the requested window" },
-    { code: 6003; name: "divisionByZero"; msg: "Division by zero — slot span is zero" },
-    { code: 6004; name: "invalidCapacity"; msg: "Observation buffer capacity must be greater than zero" },
-    { code: 6005; name: "insufficientHistory"; msg: "Not enough observations to compute swap for requested window" }
+    { code: 6003; name: "invalidCapacity"; msg: "Observation buffer capacity must be greater than zero" },
+    { code: 6004; name: "insufficientHistory"; msg: "Not enough observations to compute swap for requested window" }
   ];
   types: [
     {
@@ -237,9 +236,8 @@ export const IDL: SlotTwapOracle = {
     { code: 6000, name: "priceOverflow", msg: "Price overflow detected" },
     { code: 6001, name: "staleSlot", msg: "Stale oracle update — slot has not advanced" },
     { code: 6002, name: "insufficientObservations", msg: "Not enough observations to compute SWAP for the requested window" },
-    { code: 6003, name: "divisionByZero", msg: "Division by zero — slot span is zero" },
-    { code: 6004, name: "invalidCapacity", msg: "Observation buffer capacity must be greater than zero" },
-    { code: 6005, name: "insufficientHistory", msg: "Not enough observations to compute swap for requested window" },
+    { code: 6003, name: "invalidCapacity", msg: "Observation buffer capacity must be greater than zero" },
+    { code: 6004, name: "insufficientHistory", msg: "Not enough observations to compute swap for requested window" },
   ],
   types: [
     {
