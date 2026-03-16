@@ -7,6 +7,10 @@ use crate::utils::get_observation_before_slot;
 
 #[derive(Accounts)]
 pub struct GetSwap<'info> {
+    #[account(
+        seeds = [b"oracle", oracle.base_mint.as_ref(), oracle.quote_mint.as_ref()],
+        bump,
+    )]
     pub oracle: Account<'info, Oracle>,
 
     #[account(
