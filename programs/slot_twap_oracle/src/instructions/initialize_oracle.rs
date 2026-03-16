@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 
+use crate::errors::OracleError;
 use crate::state::{ObservationBuffer, Oracle};
 
 #[derive(Accounts)]
@@ -35,6 +36,8 @@ pub fn handler(
     quote_mint: Pubkey,
     capacity: u32,
 ) -> Result<()> {
+    require!(capacity > 0, OracleError::InvalidCapacity);
+
     let oracle = &mut ctx.accounts.oracle;
     let clock = Clock::get()?;
 

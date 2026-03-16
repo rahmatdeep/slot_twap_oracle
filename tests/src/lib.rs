@@ -730,6 +730,19 @@ mod tests {
     }
 
     #[test]
+    fn test_initialize_zero_capacity_fails() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+
+        let ix = build_initialize_ix(&payer.pubkey(), &base_mint, &quote_mint, 0);
+        send_tx_expect_err(&mut svm, &payer, &[ix]);
+    }
+
+    #[test]
     fn test_different_pairs_are_independent() {
         let mut svm = setup();
         let payer = Keypair::new();

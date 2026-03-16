@@ -13,4 +13,7 @@ pub enum OracleError {
 
     #[msg("Division by zero — slot span is zero")]
     DivisionByZero,
+
+    #[msg("Observation buffer capacity must be greater than zero")]
+    InvalidCapacity,
 }
