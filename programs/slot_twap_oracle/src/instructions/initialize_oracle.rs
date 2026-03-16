@@ -1,9 +1,9 @@
 use anchor_lang::prelude::*;
 
-use crate::state::Oracle;
+use crate::state::{ObservationBuffer, Oracle};
 
 #[derive(Accounts)]
-#[instruction(base_mint: Pubkey, quote_mint: Pubkey)]
+#[instruction(base_mint: Pubkey, quote_mint: Pubkey, capacity: u32)]
 pub struct InitializeOracle<'info> {
     #[account(
         init,
@@ -13,6 +13,15 @@ pub struct InitializeOracle<'info> {
         bump,
     )]
     pub oracle: Account<'info, Oracle>,
+
+    #[account(
+        init,
+        payer = payer,
+        space = ObservationBuffer::space(capacity),
+        seeds = [b"observation", oracle.key().as_ref()],
+        bump,
+    )]
+    pub observation_buffer: Account<'info, ObservationBuffer>,
 
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -24,6 +33,7 @@ pub fn handler(
     ctx: Context<InitializeOracle>,
     base_mint: Pubkey,
     quote_mint: Pubkey,
+    capacity: u32,
 ) -> Result<()> {
     let oracle = &mut ctx.accounts.oracle;
     let clock = Clock::get()?;
@@ -34,6 +44,12 @@ pub fn handler(
     oracle.cumulative_price = 0;
     oracle.last_slot = clock.slot;
     oracle.bump = ctx.bumps.oracle;
+
+    let buffer = &mut ctx.accounts.observation_buffer;
+    buffer.oracle = oracle.key();
+    buffer.head = 0;
+    buffer.capacity = capacity;
+    buffer.observations = Vec::new();
 
     Ok(())
 }

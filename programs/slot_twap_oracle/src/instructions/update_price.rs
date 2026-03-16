@@ -2,12 +2,21 @@ use anchor_lang::prelude::*;
 
 use crate::errors::OracleError;
 use crate::events::PriceUpdated;
-use crate::state::Oracle;
+use crate::state::{ObservationBuffer, Oracle};
+use crate::utils::push_observation;
 
 #[derive(Accounts)]
 pub struct UpdatePrice<'info> {
     #[account(mut)]
     pub oracle: Account<'info, Oracle>,
+
+    #[account(
+        mut,
+        has_one = oracle,
+        seeds = [b"observation", oracle.key().as_ref()],
+        bump,
+    )]
+    pub observation_buffer: Account<'info, ObservationBuffer>,
 }
 
 pub fn handler(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
@@ -32,6 +41,9 @@ pub fn handler(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
 
     oracle.last_price = new_price;
     oracle.last_slot = current_slot;
+
+    let buffer = &mut ctx.accounts.observation_buffer;
+    push_observation(buffer, current_slot, oracle.cumulative_price);
 
     emit!(PriceUpdated {
         slot: current_slot,
