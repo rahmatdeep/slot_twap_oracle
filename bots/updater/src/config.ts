@@ -25,7 +25,39 @@ export const UPDATE_INTERVAL_MS = parseInt(
   10
 );
 
+export function loadKeypairFromFile(filePath: string): Uint8Array {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Keypair file not found: ${filePath}`);
+  }
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, "utf-8");
+  } catch (err) {
+    throw new Error(`Failed to read keypair file ${filePath}: ${(err as Error).message}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Keypair file ${filePath} is not valid JSON`);
+  }
+
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length !== 64 ||
+    !parsed.every((b) => Number.isInteger(b) && b >= 0 && b <= 255)
+  ) {
+    throw new Error(
+      `Keypair file ${filePath} does not contain a valid secret key array ` +
+        `(expected a JSON array of 64 integers in 0..255)`
+    );
+  }
+
+  return Uint8Array.from(parsed);
+}
+
 export function loadKeypair(): Uint8Array {
-  const raw = fs.readFileSync(KEYPAIR_PATH, "utf-8");
-  return Uint8Array.from(JSON.parse(raw));
+  return loadKeypairFromFile(KEYPAIR_PATH);
 }
