@@ -1,4 +1,9 @@
+import { AnchorProvider, BN, Wallet } from "@coral-xyz/anchor";
 import { Connection, Keypair } from "@solana/web3.js";
+import {
+  SlotTwapOracleClient,
+  findOraclePda,
+} from "@slot-twap-oracle/sdk";
 import {
   RPC_URL,
   ORACLE_PROGRAM_ID,
@@ -9,28 +14,21 @@ import {
   loadKeypair,
 } from "./config";
 import { fetchRaydiumPrice, PRICE_DECIMALS } from "./raydium";
-import {
-  deriveOraclePda,
-  deriveObservationBufferPda,
-  buildUpdatePriceIx,
-} from "./oracleClient";
-import { sendTransaction } from "./sender";
 
 const connection = new Connection(RPC_URL, "confirmed");
 const payer = Keypair.fromSecretKey(loadKeypair());
+const provider = new AnchorProvider(connection, new Wallet(payer), {
+  commitment: "confirmed",
+});
 
-const [oraclePda] = deriveOraclePda(BASE_MINT, QUOTE_MINT, ORACLE_PROGRAM_ID);
-const [observationBuffer] = deriveObservationBufferPda(
-  oraclePda,
-  ORACLE_PROGRAM_ID
-);
+const client = new SlotTwapOracleClient(provider, ORACLE_PROGRAM_ID);
+const [oraclePda] = client.findOraclePda(BASE_MINT, QUOTE_MINT);
+const [observationBuffer] = client.findObservationBufferPda(oraclePda);
 
 console.log(`[updater] Oracle PDA: ${oraclePda.toBase58()}`);
 console.log(`[updater] Observation buffer: ${observationBuffer.toBase58()}`);
 console.log(`[updater] Raydium AMM: ${RAYDIUM_AMM_ID.toBase58()}`);
-console.log(
-  `[updater] Update interval: ${UPDATE_INTERVAL_MS / 1000}s`
-);
+console.log(`[updater] Update interval: ${UPDATE_INTERVAL_MS / 1000}s`);
 
 async function tick(): Promise<void> {
   try {
@@ -39,14 +37,7 @@ async function tick(): Promise<void> {
       `[updater] Fetched price: ${price} (${Number(price) / 10 ** PRICE_DECIMALS} scaled)`
     );
 
-    const ix = buildUpdatePriceIx(
-      oraclePda,
-      observationBuffer,
-      ORACLE_PROGRAM_ID,
-      price
-    );
-
-    const sig = await sendTransaction(connection, payer, [ix]);
+    const sig = await client.updatePrice(oraclePda, new BN(price.toString()), payer);
     console.log(`[updater] update_price tx: ${sig}`);
   } catch (err) {
     console.error(`[updater] Error: ${(err as Error).message}`);
@@ -56,7 +47,6 @@ async function tick(): Promise<void> {
 async function main(): Promise<void> {
   console.log("[updater] Starting updater bot...");
 
-  // Run immediately, then on interval
   await tick();
   setInterval(tick, UPDATE_INTERVAL_MS);
 }
