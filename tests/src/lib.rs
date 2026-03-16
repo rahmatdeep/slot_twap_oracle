@@ -12,6 +12,7 @@ mod tests {
     };
     use std::str::FromStr;
 
+    use litesvm::types::TransactionMetadata;
     use slot_twap_oracle::math::compute_swap;
     use slot_twap_oracle::state::{ObservationBuffer, Oracle};
     use slot_twap_oracle::utils::get_observation_before_slot;
@@ -69,6 +70,20 @@ mod tests {
         }
     }
 
+    fn build_get_swap_ix(oracle: &Pubkey, window_slots: u64) -> Instruction {
+        let (obs_pda, _) = observation_buffer_pda(oracle);
+        let data = slot_twap_oracle::instruction::GetSwap { window_slots }.data();
+
+        Instruction {
+            program_id: program_id(),
+            accounts: vec![
+                AccountMeta::new_readonly(*oracle, false),
+                AccountMeta::new_readonly(obs_pda, false),
+            ],
+            data,
+        }
+    }
+
     fn build_update_price_ix(oracle: &Pubkey, new_price: u128) -> Instruction {
         let (obs_pda, _) = observation_buffer_pda(oracle);
         let data = slot_twap_oracle::instruction::UpdatePrice { new_price }.data();
@@ -94,6 +109,27 @@ mod tests {
             .expect("ObservationBuffer account not found");
         ObservationBuffer::deserialize(&mut &account.data[8..])
             .expect("Failed to deserialize ObservationBuffer")
+    }
+
+    /// Parse Anchor return value from transaction return data.
+    fn parse_return_value<T: AnchorDeserialize>(meta: &TransactionMetadata) -> T {
+        let data = &meta.return_data.data;
+        T::deserialize(&mut &data[..]).expect("Failed to deserialize return value")
+    }
+
+    /// Helper: send get_swap and return the u128 result
+    fn do_get_swap(
+        svm: &mut LiteSVM,
+        payer: &Keypair,
+        oracle_pda: &Pubkey,
+        window_slots: u64,
+    ) -> u128 {
+        let ix = build_get_swap_ix(oracle_pda, window_slots);
+        let blockhash = svm.latest_blockhash();
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[payer], blockhash);
+        let meta = svm.send_transaction(tx).expect("get_swap failed");
+        parse_return_value::<u128>(&meta)
     }
 
     /// Helper: initialize oracle + observation buffer and return (oracle_pda, init_slot)
@@ -406,5 +442,118 @@ mod tests {
         .unwrap();
         // (4000 - 0) / (30 - 10) = 200
         assert_eq!(swap, 200);
+    }
+
+    // ── get_swap instruction tests ──
+
+    #[test]
+    fn test_get_swap_basic() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Price=500 for 20 slots, then price=1000 for 10 slots
+        do_update_price(&mut svm, &payer, &oracle_pda, 500, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 30);
+
+        // Warp to slot+40 so there's elapsed time since last update
+        // At slot+40: cumulative = 0 + 500*20 + 1000*10 = 20_000 (on-chain)
+        // get_swap extends: cumulative_now = 20_000 + 1000*10 = 30_000 (live at slot+50? no)
+        // Actually let's stay at slot+30 for simplicity — call get_swap immediately
+        // cumulative on-chain = 10_000, slot_delta_since_last = 0
+        // So cumulative_now = 10_000 + 1000*0 = 10_000
+        // Window of 20 slots: window_start = 30-20 = 10
+        // Past obs: observation at slot init_slot+10 (slot < 11), cumulative=0
+        // SWAP = (10_000 - 0) / (30 - (init_slot+10))... wait, slots are absolute
+
+        // Let me just warp forward and test clearly
+        svm.warp_to_slot(init_slot + 40);
+        svm.expire_blockhash();
+
+        // At slot init_slot+40:
+        // cumulative_now = 10_000 + 1000*(40-30) = 20_000
+        // window_slots=30 → window_start = (init_slot+40) - 30 = init_slot+10
+        // Past obs: need slot <= init_slot+10 → observation at init_slot+10, cumulative=0
+        // SWAP = (20_000 - 0) / (init_slot+40 - init_slot-10) = 20_000/30 = 666
+        let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 30);
+        assert_eq!(swap, 666);
+    }
+
+    #[test]
+    fn test_get_swap_constant_price() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Set constant price of 1000
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 10);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 20);
+        do_update_price(&mut svm, &payer, &oracle_pda, 1000, init_slot + 30);
+
+        svm.warp_to_slot(init_slot + 40);
+        svm.expire_blockhash();
+
+        // cumulative_now = 0 + 1000*10 + 1000*10 + 1000*10 = 30_000
+        // window=30: window_start = init_slot+10, past_obs at slot init_slot+10 (cumul=0)
+        // SWAP = 30_000 / 30 = 1000
+        let swap = do_get_swap(&mut svm, &payer, &oracle_pda, 30);
+        assert_eq!(swap, 1000);
+    }
+
+    #[test]
+    fn test_get_swap_insufficient_observations() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, _init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // No updates — buffer is empty, get_swap should fail
+        let ix = build_get_swap_ix(&oracle_pda, 10);
+        let blockhash = svm.latest_blockhash();
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+        let result = svm.send_transaction(tx);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_swap_window_too_large() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        do_update_price(&mut svm, &payer, &oracle_pda, 500, init_slot + 10);
+
+        svm.warp_to_slot(init_slot + 20);
+        svm.expire_blockhash();
+
+        // Window of 1000 slots is larger than any observation history
+        // window_start = (init_slot+20) - 1000 — if this underflows it errors,
+        // otherwise no observation before that slot exists
+        let ix = build_get_swap_ix(&oracle_pda, 1000);
+        let blockhash = svm.latest_blockhash();
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+        let result = svm.send_transaction(tx);
+        assert!(result.is_err());
     }
 }
