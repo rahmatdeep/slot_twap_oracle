@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 
 pub mod errors;
+pub mod events;
 pub mod instructions;
 pub mod state;
 
@@ -18,5 +19,9 @@ pub mod slot_twap_oracle {
         quote_mint: Pubkey,
     ) -> Result<()> {
         instructions::initialize_oracle::handler(ctx, base_mint, quote_mint)
+    }
+
+    pub fn update_price(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
+        instructions::update_price::handler(ctx, new_price)
     }
 }
