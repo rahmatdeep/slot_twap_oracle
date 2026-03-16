@@ -45,10 +45,10 @@ pub fn handler(ctx: Context<GetSwap>, window_slots: u64) -> Result<u128> {
     // Find an observation before the start of the window
     let window_start = current_slot
         .checked_sub(window_slots)
-        .ok_or(OracleError::PriceOverflow)?;
+        .ok_or(OracleError::InsufficientHistory)?;
 
     let past_obs = get_observation_before_slot(buffer, window_start + 1)
-        .ok_or(OracleError::InsufficientObservations)?;
+        .ok_or(OracleError::InsufficientHistory)?;
 
     compute_swap(
         cumulative_now,

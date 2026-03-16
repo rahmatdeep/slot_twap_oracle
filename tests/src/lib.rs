@@ -12,7 +12,11 @@ mod tests {
     };
     use std::str::FromStr;
 
-    use litesvm::types::TransactionMetadata;
+    use litesvm::types::{FailedTransactionMetadata, TransactionMetadata};
+    use solana_sdk::instruction::InstructionError;
+    use solana_sdk::transaction::TransactionError;
+
+    use slot_twap_oracle::errors::OracleError;
     use slot_twap_oracle::math::compute_swap;
     use slot_twap_oracle::state::{ObservationBuffer, Oracle};
     use slot_twap_oracle::utils::get_observation_before_slot;
@@ -120,6 +124,18 @@ mod tests {
     fn parse_return_value<T: AnchorDeserialize>(meta: &TransactionMetadata) -> T {
         let data = &meta.return_data.data;
         T::deserialize(&mut &data[..]).expect("Failed to deserialize return value")
+    }
+
+    /// Helper: assert that a failed transaction contains a specific anchor error code
+    fn assert_anchor_error(result: &Result<TransactionMetadata, FailedTransactionMetadata>, expected: OracleError) {
+        let failed = result.as_ref().expect_err("Expected transaction to fail");
+        let expected_code = 6000u32 + expected as u32;
+        match &failed.err {
+            TransactionError::InstructionError(_, InstructionError::Custom(code)) => {
+                assert_eq!(*code, expected_code, "Expected error code {expected_code} ({expected:?}), got {code}");
+            }
+            other => panic!("Expected InstructionError::Custom, got {other:?}"),
+        }
     }
 
     /// Helper: send get_swap and return the u128 result
@@ -556,14 +572,40 @@ mod tests {
         svm.expire_blockhash();
 
         // Window of 1000 slots is larger than any observation history
-        // window_start = (init_slot+20) - 1000 — if this underflows it errors,
-        // otherwise no observation before that slot exists
+        // window_start = (init_slot+20) - 1000 — underflows, returning InsufficientHistory
         let ix = build_get_swap_ix(&oracle_pda, 1000);
         let blockhash = svm.latest_blockhash();
         let tx =
             Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
         let result = svm.send_transaction(tx);
-        assert!(result.is_err());
+        assert_anchor_error(&result, OracleError::InsufficientHistory);
+    }
+
+    #[test]
+    fn test_get_swap_no_observation_before_window() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Single observation at init_slot+10
+        do_update_price(&mut svm, &payer, &oracle_pda, 500, init_slot + 10);
+
+        svm.warp_to_slot(init_slot + 20);
+        svm.expire_blockhash();
+
+        // Window of 15 slots: window_start = (init_slot+20) - 15 = init_slot+5
+        // No observation exists before init_slot+5+1 = init_slot+6, so InsufficientHistory
+        let ix = build_get_swap_ix(&oracle_pda, 15);
+        let blockhash = svm.latest_blockhash();
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
+        let result = svm.send_transaction(tx);
+        assert_anchor_error(&result, OracleError::InsufficientHistory);
     }
 
     // ── Scenario tests (mocked slots) ──

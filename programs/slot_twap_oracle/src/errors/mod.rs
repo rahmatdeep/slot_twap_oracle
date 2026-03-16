@@ -16,4 +16,7 @@ pub enum OracleError {
 
     #[msg("Observation buffer capacity must be greater than zero")]
     InvalidCapacity,
+
+    #[msg("Not enough observations to compute swap for requested window")]
+    InsufficientHistory,
 }
