@@ -17,6 +17,15 @@ use anchor_lang::prelude::*;
 /// This gives the average price weighted by the duration (in slots) each price
 /// was held — analogous to a time-weighted average price (TWAP).
 ///
+/// # Integer division and precision
+///
+/// The final division is integer division — any fractional remainder is
+/// truncated, not rounded. For example, a cumulative delta of 7 over 2 slots
+/// yields 3, not 3.5. To preserve meaningful precision, price inputs passed
+/// to `update_price` should be pre-scaled by a fixed factor (e.g. 1e6 or 1e9).
+/// The SWAP result will then carry the same scale, and callers can interpret it
+/// accordingly.
+///
 /// # Why slots instead of timestamps on Solana
 ///
 /// Solana's `Clock::unix_timestamp` is set by validators via a stake-weighted
@@ -41,5 +50,6 @@ pub fn compute_swap(
         .checked_sub(cumulative_past)
         .ok_or(OracleError::PriceOverflow)?;
 
+    // Integer division: fractional remainder is truncated, not rounded.
     Ok(cumulative_delta / slot_delta as u128)
 }
