@@ -19,7 +19,18 @@ export const KEYPAIR_PATH = requireEnv("KEYPAIR_PATH").replace(
 export const ORACLE_PROGRAM_ID = new PublicKey(requireEnv("ORACLE_PROGRAM_ID"));
 export const BASE_MINT = new PublicKey(requireEnv("BASE_MINT"));
 export const QUOTE_MINT = new PublicKey(requireEnv("QUOTE_MINT"));
-export const RAYDIUM_AMM_ID = new PublicKey(requireEnv("RAYDIUM_AMM_ID"));
+function optionalPubkey(key: string): PublicKey | null {
+  const val = process.env[key];
+  if (!val) return null;
+  return new PublicKey(val);
+}
+
+export const RAYDIUM_AMM_ID = optionalPubkey("RAYDIUM_AMM_ID");
+export const ORCA_WHIRLPOOL_ID = optionalPubkey("ORCA_WHIRLPOOL_ID");
+export const METEORA_POOL_ID = optionalPubkey("METEORA_POOL_ID");
+
+export const MIN_SOURCES = parseInt(process.env.MIN_SOURCES || "2", 10);
+
 export const UPDATE_INTERVAL_MS = parseInt(
   process.env.UPDATE_INTERVAL_MS || "30000",
   10
