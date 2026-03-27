@@ -7,6 +7,7 @@ export interface OracleAccount {
   lastPrice: BN;
   cumulativePrice: BN;
   lastSlot: BN;
+  lastUpdater: PublicKey;
 }
 
 export interface Observation {

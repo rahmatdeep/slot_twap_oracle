@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::OracleError;
-use crate::events::PriceUpdated;
+use crate::events::{PriceUpdated, UpdateSubmitted};
 use crate::state::{ObservationBuffer, Oracle};
 use crate::utils::push_observation;
 
@@ -47,6 +47,7 @@ pub fn handler(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
 
     oracle.last_price = new_price;
     oracle.last_slot = current_slot;
+    oracle.last_updater = ctx.accounts.payer.key();
 
     let buffer = &mut ctx.accounts.observation_buffer;
     push_observation(buffer, current_slot, oracle.cumulative_price);
@@ -55,6 +56,12 @@ pub fn handler(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
         slot: current_slot,
         new_price,
         cumulative_price: oracle.cumulative_price,
+    });
+
+    emit!(UpdateSubmitted {
+        updater: ctx.accounts.payer.key(),
+        slot: current_slot,
+        price: new_price,
     });
 
     Ok(())
