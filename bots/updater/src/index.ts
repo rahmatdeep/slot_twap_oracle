@@ -258,14 +258,36 @@ async function tick(): Promise<void> {
   }
 }
 
+let tickTimer: ReturnType<typeof setInterval> | null = null;
+let metricsTimer: ReturnType<typeof setInterval> | null = null;
+let shuttingDown = false;
+
+function shutdown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  log("updater", `Received ${signal}, shutting down...`);
+
+  if (tickTimer) clearInterval(tickTimer);
+  if (metricsTimer) clearInterval(metricsTimer);
+
+  metrics.flush();
+  metrics.log(ts());
+
+  log("updater", "Shutdown complete.");
+  process.exit(0);
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+
 async function main(): Promise<void> {
   log("updater", "Starting updater bot...");
 
-  // Log metrics every 5 minutes
-  setInterval(() => metrics.log(ts()), METRICS_INTERVAL_MS);
+  metricsTimer = setInterval(() => metrics.log(ts()), METRICS_INTERVAL_MS);
 
   await tick();
-  setInterval(tick, UPDATE_INTERVAL_MS);
+  tickTimer = setInterval(tick, UPDATE_INTERVAL_MS);
 }
 
 main();

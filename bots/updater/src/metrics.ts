@@ -87,6 +87,10 @@ export class PersistentMetrics {
     }
   }
 
+  flush(): void {
+    this.save();
+  }
+
   snapshot(): MetricsData {
     return { ...this.data, lastUpdateSlot: { ...this.data.lastUpdateSlot } };
   }
