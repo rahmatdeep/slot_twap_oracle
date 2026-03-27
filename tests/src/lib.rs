@@ -256,7 +256,7 @@ mod tests {
         assert_eq!(buffer.oracle, oracle_pda);
         assert_eq!(buffer.head, 0);
         assert_eq!(buffer.capacity, DEFAULT_CAPACITY);
-        assert_eq!(buffer.observations.len(), 0);
+        assert_eq!(buffer.len, 0);
     }
 
     #[test]
@@ -280,7 +280,7 @@ mod tests {
 
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
-        assert_eq!(buffer.observations.len(), 1);
+        assert_eq!(buffer.len, 1);
         assert_eq!(buffer.observations[0].slot, init_slot + 10);
         assert_eq!(buffer.observations[0].cumulative_price, 0);
     }
@@ -318,7 +318,7 @@ mod tests {
         // Verify observations were stored
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
-        assert_eq!(buffer.observations.len(), 3);
+        assert_eq!(buffer.len, 3);
     }
 
     // ── Observation buffer tests ──
@@ -341,7 +341,7 @@ mod tests {
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
 
-        assert_eq!(buffer.observations.len(), 3);
+        assert_eq!(buffer.len, 3);
         assert_eq!(buffer.observations[0].slot, init_slot + 5);
         assert_eq!(buffer.observations[0].cumulative_price, 0); // 0 * 5
         assert_eq!(buffer.observations[1].slot, init_slot + 15);
@@ -370,14 +370,14 @@ mod tests {
 
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
-        assert_eq!(buffer.observations.len(), 3);
+        assert_eq!(buffer.len, 3);
         assert_eq!(buffer.head, 0); // wrapped around
 
         // 4th update should overwrite index 0
         do_update_price(&mut svm, &payer, &oracle_pda, 1090, init_slot + 40);
 
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
-        assert_eq!(buffer.observations.len(), 3); // still 3
+        assert_eq!(buffer.len, 3); // still 3
         assert_eq!(buffer.head, 1);
         // Index 0 was overwritten with the 4th observation
         assert_eq!(buffer.observations[0].slot, init_slot + 40);
@@ -676,7 +676,7 @@ mod tests {
         assert_eq!(buffer.oracle, oracle_pda);
         assert_eq!(buffer.head, 0);
         assert_eq!(buffer.capacity, DEFAULT_CAPACITY);
-        assert!(buffer.observations.is_empty());
+        assert!(buffer.len == 0);
     }
 
     #[test]
@@ -986,13 +986,13 @@ mod tests {
 
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
-        assert_eq!(buffer.observations.len(), 1);
+        assert_eq!(buffer.len, 1);
         assert_eq!(buffer.observations[0].slot, init_slot + 10);
 
         // Second update overwrites the only slot
         do_update_price(&mut svm, &payer, &oracle_pda, 1100, init_slot + 20);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
-        assert_eq!(buffer.observations.len(), 1);
+        assert_eq!(buffer.len, 1);
         assert_eq!(buffer.observations[0].slot, init_slot + 20);
         assert_eq!(buffer.observations[0].cumulative_price, 10_000); // 1000 * 10
     }
@@ -1275,9 +1275,9 @@ mod tests {
         let eth_buf = deserialize_observation_buffer(&svm, &eth_obs);
         let btc_buf = deserialize_observation_buffer(&svm, &btc_obs);
 
-        assert_eq!(sol_buf.observations.len(), 1);
-        assert_eq!(eth_buf.observations.len(), 1);
-        assert_eq!(btc_buf.observations.len(), 1);
+        assert_eq!(sol_buf.len, 1);
+        assert_eq!(eth_buf.len, 1);
+        assert_eq!(btc_buf.len, 1);
     }
 
     #[test]
@@ -1505,7 +1505,7 @@ mod tests {
             let (obs_pda, _) = observation_buffer_pda(oracle_pda);
             let buffer = deserialize_observation_buffer(&svm, &obs_pda);
             assert_eq!(
-                buffer.observations.len(), 1,
+                buffer.len, 1,
                 "Pair {} should have 1 observation", i
             );
         }
@@ -1543,7 +1543,7 @@ mod tests {
 
             let (obs_pda, _) = observation_buffer_pda(oracle_pda);
             let buffer = deserialize_observation_buffer(&svm, &obs_pda);
-            assert_eq!(buffer.observations.len(), 2, "Pair {} should have 2 observations", i);
+            assert_eq!(buffer.len, 2, "Pair {} should have 2 observations", i);
         }
     }
 
@@ -2222,7 +2222,7 @@ mod tests {
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
         assert_eq!(buffer.capacity, 10);
         // All observations preserved
-        assert_eq!(buffer.observations.len(), 2);
+        assert_eq!(buffer.len, 2);
         assert_eq!(buffer.observations[0].slot, init_slot + 10);
         assert_eq!(buffer.observations[1].slot, init_slot + 20);
     }
@@ -2258,7 +2258,7 @@ mod tests {
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
         assert_eq!(buffer.capacity, 2);
-        assert_eq!(buffer.observations.len(), 2);
+        assert_eq!(buffer.len, 2);
         // Most recent 2: slot+30 and slot+40
         assert_eq!(buffer.observations[0].slot, init_slot + 30);
         assert_eq!(buffer.observations[1].slot, init_slot + 40);
@@ -2296,7 +2296,7 @@ mod tests {
         let (obs_pda, _) = observation_buffer_pda(&oracle_pda);
         let buffer = deserialize_observation_buffer(&svm, &obs_pda);
         assert_eq!(buffer.capacity, 2);
-        assert_eq!(buffer.observations.len(), 2);
+        assert_eq!(buffer.len, 2);
         assert_eq!(buffer.observations[0].slot, init_slot + 30);
         assert_eq!(buffer.observations[1].slot, init_slot + 40);
     }

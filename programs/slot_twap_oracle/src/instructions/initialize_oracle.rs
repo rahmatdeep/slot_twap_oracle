@@ -54,8 +54,9 @@ pub fn handler(
     let buffer = &mut ctx.accounts.observation_buffer;
     buffer.oracle = oracle.key();
     buffer.head = 0;
+    buffer.len = 0;
     buffer.capacity = capacity;
-    buffer.observations = Vec::new();
+    buffer.observations = vec![Default::default(); capacity as usize];
 
     Ok(())
 }

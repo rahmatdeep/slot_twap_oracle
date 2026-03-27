@@ -21,6 +21,7 @@ export interface Observation {
 export interface ObservationBufferAccount {
   oracle: PublicKey;
   head: number;
+  len: number;
   capacity: number;
   observations: Observation[];
 }

@@ -201,11 +201,12 @@ export class SlotTwapOracleClient {
     buffer: ObservationBufferAccount,
     targetSlot: BN
   ): Observation | null {
-    const len = buffer.observations.length;
-    if (len === 0) return null;
+    const populated = buffer.len;
+    if (populated === 0) return null;
 
-    for (let i = 1; i <= len; i++) {
-      const idx = (buffer.head + len - i) % len;
+    const cap = buffer.capacity;
+    for (let i = 1; i <= populated; i++) {
+      const idx = (buffer.head + cap - i) % cap;
       const obs = buffer.observations[idx];
       if (obs.slot.lt(targetSlot)) {
         return obs;

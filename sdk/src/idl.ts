@@ -168,6 +168,7 @@ export type SlotTwapOracle = {
         fields: [
           { name: "oracle"; type: "pubkey" },
           { name: "head"; type: "u32" },
+          { name: "len"; type: "u32" },
           { name: "capacity"; type: "u32" },
           { name: "observations"; type: { vec: { defined: { name: "observation" } } } }
         ];
@@ -420,6 +421,7 @@ export const IDL: SlotTwapOracle = {
         fields: [
           { name: "oracle", type: "pubkey" },
           { name: "head", type: "u32" },
+          { name: "len", type: "u32" },
           { name: "capacity", type: "u32" },
           { name: "observations", type: { vec: { defined: { name: "observation" } } } },
         ],
