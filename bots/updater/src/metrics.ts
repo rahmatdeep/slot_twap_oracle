@@ -7,6 +7,7 @@ export interface MetricsData {
   successful: number;
   failed: number;
   skipped: number;
+  staleOracles: number;
   lastSuccessfulUpdate: string | null; // ISO timestamp
   lastUpdateSlot: Record<string, number>;
 }
@@ -16,6 +17,7 @@ function empty(): MetricsData {
     successful: 0,
     failed: 0,
     skipped: 0,
+    staleOracles: 0,
     lastSuccessfulUpdate: null,
     lastUpdateSlot: {},
   };
@@ -54,6 +56,7 @@ export class PersistentMetrics {
   get successful(): number { return this.data.successful; }
   get failed(): number { return this.data.failed; }
   get skipped(): number { return this.data.skipped; }
+  get staleOracles(): number { return this.data.staleOracles; }
   get lastSuccessfulUpdate(): string | null { return this.data.lastSuccessfulUpdate; }
 
   getLastUpdateSlot(pair: string): number | undefined {
@@ -77,10 +80,16 @@ export class PersistentMetrics {
     this.save();
   }
 
+  recordStale(): void {
+    this.data.staleOracles++;
+    this.save();
+  }
+
   log(ts: string): void {
     console.log(
       `${ts} [metrics] successful=${this.data.successful} failed=${this.data.failed} ` +
-        `skipped=${this.data.skipped} last_success=${this.data.lastSuccessfulUpdate ?? "never"}`
+        `skipped=${this.data.skipped} stale=${this.data.staleOracles} ` +
+        `last_success=${this.data.lastSuccessfulUpdate ?? "never"}`
     );
     for (const [name, slot] of Object.entries(this.data.lastUpdateSlot)) {
       console.log(`${ts} [metrics]   ${name}: last_update_slot=${slot}`);

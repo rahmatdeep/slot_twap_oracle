@@ -14,6 +14,8 @@ import { fetchPrice as fetchRaydium } from "./sources/raydium";
 import { fetchPrice as fetchOrca } from "./sources/orca";
 import { fetchPrice as fetchMeteora } from "./sources/meteora";
 import { PersistentMetrics } from "./metrics";
+import { startPrometheusServer } from "./prometheus";
+import { alertIfStale, StaleOracleInfo } from "./alerts";
 
 const PRICE_DECIMALS = 9;
 const MAX_RETRIES = 5;
@@ -198,14 +200,17 @@ function toScaledBigint(price: number): bigint {
   return BigInt(Math.round(price * 10 ** PRICE_DECIMALS));
 }
 
-async function checkStaleness(pair: Pair, currentSlot: number): Promise<void> {
+function checkStaleness(pair: Pair, currentSlot: number): boolean {
   const lastSlot = metrics.getLastUpdateSlot(pair.name);
   if (lastSlot !== undefined && currentSlot - lastSlot > STALE_ORACLE_SLOTS) {
     warn(
       pair.name,
       `Oracle stale: last update at slot ${lastSlot}, current slot ${currentSlot} (${currentSlot - lastSlot} slots behind)`
     );
+    metrics.recordStale();
+    return true;
   }
+  return false;
 }
 
 async function updatePair(pair: Pair): Promise<void> {
@@ -262,10 +267,20 @@ async function tick(): Promise<void> {
   const currentSlot = await connection.getSlot().catch(() => 0);
 
   // Check staleness for all pairs before updating
+  const staleOracles: StaleOracleInfo[] = [];
   if (currentSlot > 0) {
     for (const pair of pairs) {
-      await checkStaleness(pair, currentSlot);
+      if (checkStaleness(pair, currentSlot)) {
+        staleOracles.push({
+          name: pair.name,
+          lastSlot: metrics.getLastUpdateSlot(pair.name) ?? 0,
+          currentSlot,
+        });
+      }
     }
+  }
+  if (staleOracles.length > 0) {
+    alertIfStale(staleOracles);
   }
 
   const results = await Promise.allSettled(pairs.map((pair) => updatePair(pair)));
@@ -284,6 +299,7 @@ async function tick(): Promise<void> {
 
 let tickTimer: ReturnType<typeof setInterval> | null = null;
 let metricsTimer: ReturnType<typeof setInterval> | null = null;
+let promServer: ReturnType<typeof startPrometheusServer> | null = null;
 let shuttingDown = false;
 
 function shutdown(signal: string): void {
@@ -294,6 +310,7 @@ function shutdown(signal: string): void {
 
   if (tickTimer) clearInterval(tickTimer);
   if (metricsTimer) clearInterval(metricsTimer);
+  if (promServer) promServer.close();
 
   metrics.flush();
   metrics.log(ts());
@@ -307,6 +324,9 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 async function main(): Promise<void> {
   log("updater", "Starting updater bot...");
+
+  const promPort = parseInt(process.env.PROMETHEUS_PORT || "9090", 10);
+  promServer = startPrometheusServer(metrics, promPort);
 
   metricsTimer = setInterval(() => metrics.log(ts()), METRICS_INTERVAL_MS);
 
