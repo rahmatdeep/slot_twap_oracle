@@ -17,6 +17,7 @@ import { fetchPrice as fetchMeteora } from "./sources/meteora";
 const PRICE_DECIMALS = 9;
 const MAX_RETRIES = 5;
 const BASE_DELAY_MS = 1000;
+const MAX_SOURCE_SPREAD = 0.05; // 5%
 
 const connection = new Connection(RPC_URL, "confirmed");
 const payer = Keypair.fromSecretKey(loadKeypair());
@@ -155,10 +156,22 @@ async function updatePair(pair: Pair): Promise<void> {
   }
 
   const medianPrice = median(prices);
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const spread = (maxPrice - minPrice) / medianPrice;
+
+  if (spread > MAX_SOURCE_SPREAD) {
+    console.warn(
+      `[${pair.name}] High source deviation: spread=${(spread * 100).toFixed(2)}% ` +
+        `(min=${minPrice}, max=${maxPrice}, median=${medianPrice}). Skipping.`
+    );
+    return;
+  }
+
   const scaledPrice = toScaledBigint(medianPrice);
 
   console.log(
-    `[${pair.name}] Median: ${medianPrice} (${prices.length} sources) -> scaled: ${scaledPrice}`
+    `[${pair.name}] Median: ${medianPrice} (${prices.length} sources, spread=${(spread * 100).toFixed(2)}%) -> scaled: ${scaledPrice}`
   );
 
   const sig = await retryWithBackoff(
