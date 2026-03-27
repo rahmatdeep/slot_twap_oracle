@@ -9,6 +9,7 @@ const envSchema = z.object({
   WS_MAX_CONNECTIONS: z.coerce.number().int().positive().default(100),
   WS_MAX_SUBS_PER_CLIENT: z.coerce.number().int().positive().default(10),
   WS_MSG_PER_MIN: z.coerce.number().int().positive().default(30),
+  POSTGRES_URL: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

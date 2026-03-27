@@ -1,11 +1,13 @@
 import express from "express";
 import rateLimit from "express-rate-limit";
 import { config } from "./config";
+import { isDbAvailable } from "./db";
 import { requestLogger, errorHandler } from "./middleware";
 import priceRouter from "./routes/price";
 import twapRouter from "./routes/twap";
 import historyRouter from "./routes/history";
 import healthRouter from "./routes/health";
+import historicalRouter from "./routes/historical";
 
 const app = express();
 
@@ -22,8 +24,10 @@ const apiLimiter = rateLimit({
 app.use("/price", apiLimiter, priceRouter);
 app.use("/twap", apiLimiter, twapRouter);
 app.use("/history", apiLimiter, historyRouter);
-app.use("/health", healthRouter); // no rate limit on health
+app.use("/historical", apiLimiter, historicalRouter);
+app.use("/health", healthRouter);
 
 app.use(errorHandler);
 
+export { isDbAvailable };
 export default app;

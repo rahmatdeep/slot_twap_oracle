@@ -23,6 +23,14 @@ export const historyQuery = z.object({
   limit: z.coerce.number().int().positive().max(100).default(20),
 });
 
+export const historicalQuery = z.object({
+  oracle: pubkey,
+  from_slot: z.coerce.number().int().nonnegative().optional(),
+  to_slot: z.coerce.number().int().positive().optional(),
+  interval: z.coerce.number().int().positive().default(100),
+  limit: z.coerce.number().int().positive().max(1000).default(200),
+});
+
 /**
  * Express middleware that validates req.query against a Zod schema.
  * On success, attaches parsed data to res.locals.query.
