@@ -13,6 +13,7 @@ import {
 import { fetchPrice as fetchRaydium } from "./sources/raydium";
 import { fetchPrice as fetchOrca } from "./sources/orca";
 import { fetchPrice as fetchMeteora } from "./sources/meteora";
+import { PersistentMetrics } from "./metrics";
 
 const PRICE_DECIMALS = 9;
 const MAX_RETRIES = 5;
@@ -41,28 +42,7 @@ function error(pair: string, msg: string): void {
 
 // ── Metrics ──
 
-interface Metrics {
-  successful: number;
-  failed: number;
-  skipped: number;
-  lastUpdateSlot: Map<string, number>;
-}
-
-const metrics: Metrics = {
-  successful: 0,
-  failed: 0,
-  skipped: 0,
-  lastUpdateSlot: new Map(),
-};
-
-function logMetrics(): void {
-  console.log(
-    `${ts()} [metrics] successful=${metrics.successful} failed=${metrics.failed} skipped=${metrics.skipped}`
-  );
-  for (const [name, slot] of metrics.lastUpdateSlot) {
-    console.log(`${ts()} [metrics]   ${name}: last_update_slot=${slot}`);
-  }
-}
+const metrics = new PersistentMetrics();
 
 // ── Setup ──
 
@@ -194,7 +174,7 @@ function toScaledBigint(price: number): bigint {
 }
 
 async function checkStaleness(pair: Pair, currentSlot: number): Promise<void> {
-  const lastSlot = metrics.lastUpdateSlot.get(pair.name);
+  const lastSlot = metrics.getLastUpdateSlot(pair.name);
   if (lastSlot !== undefined && currentSlot - lastSlot > STALE_ORACLE_SLOTS) {
     warn(
       pair.name,
@@ -209,7 +189,7 @@ async function updatePair(pair: Pair): Promise<void> {
 
   if (prices.length === 0) {
     error(pair.name, "All sources failed. Skipping.");
-    metrics.skipped++;
+    metrics.recordSkip();
     return;
   }
 
@@ -218,7 +198,7 @@ async function updatePair(pair: Pair): Promise<void> {
       pair.name,
       `Only ${prices.length}/${pair.sources.length} sources (need >= ${MIN_SOURCES}). Skipping.`
     );
-    metrics.skipped++;
+    metrics.recordSkip();
     return;
   }
 
@@ -232,7 +212,7 @@ async function updatePair(pair: Pair): Promise<void> {
       pair.name,
       `High source deviation: spread=${(spread * 100).toFixed(2)}% (min=${minPrice}, max=${maxPrice}, median=${medianPrice}). Skipping.`
     );
-    metrics.skipped++;
+    metrics.recordSkip();
     return;
   }
 
@@ -249,8 +229,7 @@ async function updatePair(pair: Pair): Promise<void> {
   );
 
   const currentSlot = await connection.getSlot();
-  metrics.lastUpdateSlot.set(pair.name, currentSlot);
-  metrics.successful++;
+  metrics.recordSuccess(pair.name, currentSlot);
 
   log(pair.name, `update_price tx: ${sig} (slot=${currentSlot}, price=${medianPrice})`);
 }
@@ -274,7 +253,7 @@ async function tick(): Promise<void> {
         pairs[i].name,
         `Failed after ${MAX_RETRIES} retries: ${result.reason?.message ?? result.reason}`
       );
-      metrics.failed++;
+      metrics.recordFailure();
     }
   }
 }
@@ -283,7 +262,7 @@ async function main(): Promise<void> {
   log("updater", "Starting updater bot...");
 
   // Log metrics every 5 minutes
-  setInterval(logMetrics, METRICS_INTERVAL_MS);
+  setInterval(() => metrics.log(ts()), METRICS_INTERVAL_MS);
 
   await tick();
   setInterval(tick, UPDATE_INTERVAL_MS);
