@@ -21,7 +21,7 @@ import {
   getMintLen,
   TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
-import { SlotTwapOracleClient, PROGRAM_ID } from "../sdk/src";
+import { SlotTwapOracleClient, PROGRAM_ID } from "@slot-twap-oracle/sdk";
 
 const RPC_URL = "http://127.0.0.1:8899";
 const PROGRAM_SO = "target/deploy/slot_twap_oracle.so";
