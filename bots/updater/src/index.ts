@@ -145,16 +145,21 @@ async function retryWithBackoff<T>(fn: () => Promise<T>, label: string): Promise
   throw new Error("unreachable");
 }
 
-async function fetchPricesForPair(pair: Pair): Promise<number[]> {
+interface NamedPrice {
+  source: string;
+  price: number;
+}
+
+async function fetchPricesForPair(pair: Pair): Promise<NamedPrice[]> {
   const results = await Promise.allSettled(
     pair.sources.map(async (source) => {
       const price = await source.fetch(connection, source.poolAddress, pair.baseMint, pair.quoteMint);
       log(pair.name, `  ${source.name}: ${price}`);
-      return price;
+      return { source: source.name, price };
     })
   );
 
-  const prices: number[] = [];
+  const prices: NamedPrice[] = [];
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
     if (result.status === "fulfilled") {
@@ -167,6 +172,26 @@ async function fetchPricesForPair(pair: Pair): Promise<number[]> {
     }
   }
   return prices;
+}
+
+function filterOutliers(pair: Pair, named: NamedPrice[]): number[] {
+  const values = named.map((n) => n.price);
+  const med = median(values);
+  if (med === 0) return values;
+
+  const kept: number[] = [];
+  for (const n of named) {
+    const deviation = Math.abs(n.price - med) / med;
+    if (deviation > MAX_SOURCE_SPREAD) {
+      warn(
+        pair.name,
+        `  ${n.source} rejected: price=${n.price}, deviation=${(deviation * 100).toFixed(2)}% from median ${med}`
+      );
+    } else {
+      kept.push(n.price);
+    }
+  }
+  return kept;
 }
 
 function toScaledBigint(price: number): bigint {
@@ -185,42 +210,41 @@ async function checkStaleness(pair: Pair, currentSlot: number): Promise<void> {
 
 async function updatePair(pair: Pair): Promise<void> {
   log(pair.name, "Fetching prices...");
-  const prices = await fetchPricesForPair(pair);
+  const namedPrices = await fetchPricesForPair(pair);
 
-  if (prices.length === 0) {
+  if (namedPrices.length === 0) {
     error(pair.name, "All sources failed. Skipping.");
     metrics.recordSkip();
     return;
   }
 
+  if (namedPrices.length < MIN_SOURCES) {
+    warn(
+      pair.name,
+      `Only ${namedPrices.length}/${pair.sources.length} sources (need >= ${MIN_SOURCES}). Skipping.`
+    );
+    metrics.recordSkip();
+    return;
+  }
+
+  // Filter outliers: reject any source deviating >5% from the median
+  const prices = filterOutliers(pair, namedPrices);
+
   if (prices.length < MIN_SOURCES) {
     warn(
       pair.name,
-      `Only ${prices.length}/${pair.sources.length} sources (need >= ${MIN_SOURCES}). Skipping.`
+      `Only ${prices.length} sources after outlier filter (need >= ${MIN_SOURCES}). Skipping.`
     );
     metrics.recordSkip();
     return;
   }
 
   const medianPrice = median(prices);
-  const minPrice = Math.min(...prices);
-  const maxPrice = Math.max(...prices);
-  const spread = (maxPrice - minPrice) / medianPrice;
-
-  if (spread > MAX_SOURCE_SPREAD) {
-    warn(
-      pair.name,
-      `High source deviation: spread=${(spread * 100).toFixed(2)}% (min=${minPrice}, max=${maxPrice}, median=${medianPrice}). Skipping.`
-    );
-    metrics.recordSkip();
-    return;
-  }
-
   const scaledPrice = toScaledBigint(medianPrice);
 
   log(
     pair.name,
-    `Median: ${medianPrice} (${prices.length} sources, spread=${(spread * 100).toFixed(2)}%) -> scaled: ${scaledPrice}`
+    `Median: ${medianPrice} (${prices.length}/${namedPrices.length} sources after filter) -> scaled: ${scaledPrice}`
   );
 
   const sig = await retryWithBackoff(
