@@ -6,6 +6,7 @@ import {
   OracleAccount,
   ObservationBufferAccount,
   Observation,
+  OracleUpdateEvent,
 } from "./types";
 
 /**
@@ -190,5 +191,101 @@ export class SlotTwapOracleClient {
       currentSlot,
       pastObs.slot
     );
+  }
+
+  // ── Event parsing ──
+
+  /**
+   * Parse OracleUpdate events from a confirmed transaction's logs.
+   */
+  async parseOracleUpdateEvents(
+    txSignature: string
+  ): Promise<OracleUpdateEvent[]> {
+    const tx = await this.program.provider.connection.getTransaction(
+      txSignature,
+      { maxSupportedTransactionVersion: 0 }
+    );
+    if (!tx?.meta?.logMessages) return [];
+
+    return SlotTwapOracleClient.decodeOracleUpdateLogs(tx.meta.logMessages);
+  }
+
+  /**
+   * Fetch recent OracleUpdate events for a given oracle address.
+   * Scans the last `limit` transactions (default 20) involving the oracle account.
+   */
+  async getOracleUpdates(
+    oraclePubkey: PublicKey,
+    limit: number = 20
+  ): Promise<OracleUpdateEvent[]> {
+    const conn = this.program.provider.connection;
+    const signatures = await conn.getSignaturesForAddress(oraclePubkey, {
+      limit,
+    });
+
+    if (signatures.length === 0) return [];
+
+    const txs = await conn.getTransactions(
+      signatures.map((s) => s.signature),
+      { maxSupportedTransactionVersion: 0 }
+    );
+
+    const events: OracleUpdateEvent[] = [];
+    for (const tx of txs) {
+      if (!tx?.meta?.logMessages) continue;
+      events.push(
+        ...SlotTwapOracleClient.decodeOracleUpdateLogs(tx.meta.logMessages)
+      );
+    }
+
+    return events;
+  }
+
+  /**
+   * Decode OracleUpdate events from raw program log lines.
+   * Anchor emits events via sol_log_data, surfaced as "Program data: <base64>".
+   */
+  static decodeOracleUpdateLogs(logs: string[]): OracleUpdateEvent[] {
+    const EVENT_DISCRIMINATOR = Buffer.from([237, 176, 133, 150, 0, 131, 48, 15]);
+    const events: OracleUpdateEvent[] = [];
+
+    for (const line of logs) {
+      if (!line.startsWith("Program data: ")) continue;
+
+      const b64 = line.slice("Program data: ".length);
+      let data: Buffer;
+      try {
+        data = Buffer.from(b64, "base64");
+      } catch {
+        continue;
+      }
+
+      if (data.length < 8 || !data.subarray(0, 8).equals(EVENT_DISCRIMINATOR)) {
+        continue;
+      }
+
+      // Layout after discriminator: oracle (32) + price (16) + cumulative_price (16) + slot (8) + updater (32)
+      const payload = data.subarray(8);
+      if (payload.length < 104) continue;
+
+      let offset = 0;
+      const oracle = new PublicKey(payload.subarray(offset, offset + 32));
+      offset += 32;
+
+      const price = new BN(payload.subarray(offset, offset + 16), "le");
+      offset += 16;
+
+      const cumulativePrice = new BN(payload.subarray(offset, offset + 16), "le");
+      offset += 16;
+
+      const slot = new BN(payload.subarray(offset, offset + 8), "le");
+      offset += 8;
+
+      const updater = new PublicKey(payload.subarray(offset, offset + 32));
+
+      events.push({ oracle, price, cumulativePrice, slot, updater });
+    }
+
+    return events;
   }
 }
