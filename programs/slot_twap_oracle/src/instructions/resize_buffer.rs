@@ -66,7 +66,17 @@ pub fn handler(ctx: Context<ResizeBuffer>, new_capacity: u32) -> Result<()> {
         buffer.len = keep as u32;
         buffer.head = keep as u32 % new_capacity;
     } else if new_capacity > old_capacity {
-        // Growing: extend with zeroed entries
+        // Growing: if the buffer was full and wrapped, linearize first so
+        // new writes go into the expanded space instead of overwriting.
+        if populated == old_capacity as usize && buffer.head != populated as u32 {
+            let head = buffer.head as usize;
+            let cap = old_capacity as usize;
+            let mut ordered = Vec::with_capacity(populated);
+            ordered.extend_from_slice(&buffer.observations[head..cap]);
+            ordered.extend_from_slice(&buffer.observations[..head]);
+            buffer.observations = ordered;
+            buffer.head = populated as u32;
+        }
         buffer.observations.resize(new_capacity as usize, Observation::default());
     }
 
