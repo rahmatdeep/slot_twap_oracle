@@ -3,8 +3,12 @@ import { WebSocketServer, WebSocket } from "ws";
 import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import { client, connection } from "./client";
+import { config } from "./config";
 
 const POLL_INTERVAL_MS = parseInt(process.env.WS_POLL_MS || "2000", 10);
+const MAX_CONNECTIONS = config.WS_MAX_CONNECTIONS;
+const MAX_SUBS_PER_CLIENT = config.WS_MAX_SUBS_PER_CLIENT;
+const MSG_PER_MIN = config.WS_MSG_PER_MIN;
 
 interface Subscription {
   oracle: PublicKey;
@@ -14,6 +18,8 @@ interface Subscription {
 interface ClientState {
   ws: WebSocket;
   subscriptions: Map<string, Subscription>;
+  msgCount: number;
+  msgWindowStart: number;
 }
 
 const clients = new Set<ClientState>();
@@ -29,7 +35,22 @@ function send(ws: WebSocket, data: object): void {
   }
 }
 
+function isRateLimited(state: ClientState): boolean {
+  const now = Date.now();
+  if (now - state.msgWindowStart > 60_000) {
+    state.msgCount = 0;
+    state.msgWindowStart = now;
+  }
+  state.msgCount++;
+  return state.msgCount > MSG_PER_MIN;
+}
+
 function handleMessage(state: ClientState, raw: string): void {
+  if (isRateLimited(state)) {
+    send(state.ws, { error: "Rate limited — too many messages" });
+    return;
+  }
+
   let msg: any;
   try {
     msg = JSON.parse(raw);
@@ -42,6 +63,13 @@ function handleMessage(state: ClientState, raw: string): void {
     const { oracle, window } = msg;
     if (!oracle || !window) {
       send(state.ws, { error: "subscribe requires oracle and window" });
+      return;
+    }
+
+    if (state.subscriptions.size >= MAX_SUBS_PER_CLIENT) {
+      send(state.ws, {
+        error: `Subscription limit reached (max ${MAX_SUBS_PER_CLIENT})`,
+      });
       return;
     }
 
@@ -137,9 +165,20 @@ export function attachWebSocket(server: HttpServer): WebSocketServer {
   const wss = new WebSocketServer({ server, path: "/ws" });
 
   wss.on("connection", (ws) => {
-    const state: ClientState = { ws, subscriptions: new Map() };
+    if (clients.size >= MAX_CONNECTIONS) {
+      ws.close(1013, "Maximum connections reached");
+      console.log(`${ts()} [ws] Rejected connection (${clients.size}/${MAX_CONNECTIONS})`);
+      return;
+    }
+
+    const state: ClientState = {
+      ws,
+      subscriptions: new Map(),
+      msgCount: 0,
+      msgWindowStart: Date.now(),
+    };
     clients.add(state);
-    console.log(`${ts()} [ws] Client connected (${clients.size} total)`);
+    console.log(`${ts()} [ws] Client connected (${clients.size}/${MAX_CONNECTIONS})`);
 
     send(ws, { type: "connected", message: "Send {action:'subscribe', oracle:'...', window:N}" });
 
@@ -148,7 +187,7 @@ export function attachWebSocket(server: HttpServer): WebSocketServer {
     ws.on("close", () => {
       clients.delete(state);
       if (!stopping) {
-        console.log(`${ts()} [ws] Client disconnected (${clients.size} total)`);
+        console.log(`${ts()} [ws] Client disconnected (${clients.size}/${MAX_CONNECTIONS})`);
       }
     });
 
