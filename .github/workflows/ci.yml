@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  SOLANA_VERSION: "2.3.2"
+  ANCHOR_VERSION: "0.31.1"
+  NODE_VERSION: "20"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v${{ env.SOLANA_VERSION }}/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Install Anchor CLI
+        run: cargo install --git https://github.com/coral-xyz/anchor avm --force
+          && avm install ${{ env.ANCHOR_VERSION }}
+          && avm use ${{ env.ANCHOR_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install root dependencies
+        run: npm install
+
+      - name: Install SDK dependencies
+        run: cd sdk && npm install
+
+      # ── Build ──
+
+      - name: Anchor build
+        run: anchor build
+
+      # ── Sync IDL ──
+
+      - name: Sync IDL to SDK
+        run: bash scripts/sync-idl.sh
+
+      - name: Verify IDL is up to date
+        run: |
+          if git diff --exit-code sdk/src/idl.json; then
+            echo "IDL is in sync."
+          else
+            echo "::error::IDL is out of sync. Run 'anchor build && bash scripts/sync-idl.sh' and commit."
+            exit 1
+          fi
+
+      # ── Test ──
+
+      - name: Rust integration tests
+        run: cargo test --manifest-path tests/Cargo.toml
+
+      - name: SDK type check
+        run: cd sdk && npx tsc --noEmit
+
+      - name: SDK build + link
+        run: |
+          cd sdk && npm run build && npm link
+          cd .. && npm link @slot-twap-oracle/sdk
+
+      - name: SDK mocha tests
+        run: npx tsx node_modules/.bin/mocha --timeout 120000 sdk-tests/oracle.test.ts
+
+      - name: Bot type check
+        run: cd bots/updater && npm link @slot-twap-oracle/sdk && npx tsc --noEmit

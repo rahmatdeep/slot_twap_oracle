@@ -154,7 +154,7 @@ export class SlotTwapOracleClient {
   // ── Account fetchers ──
 
   async fetchOracle(address: PublicKey): Promise<OracleAccount> {
-    const account = await this.program.account.oracle.fetch(address);
+    const account = await (this.program.account as any).oracle.fetch(address);
     return account as unknown as OracleAccount;
   }
 
@@ -162,7 +162,7 @@ export class SlotTwapOracleClient {
     address: PublicKey
   ): Promise<ObservationBufferAccount> {
     const account =
-      await this.program.account.observationBuffer.fetch(address);
+      await (this.program.account as any).observationBuffer.fetch(address);
     return account as unknown as ObservationBufferAccount;
   }
 
