@@ -18,7 +18,11 @@ mod tests {
 
     use solana_sdk::program_pack::Pack;
 
+    use anchor_lang::prelude::Discriminator;
+    use base64::Engine;
+
     use slot_twap_oracle::errors::OracleError;
+    use slot_twap_oracle::events::{PriceUpdated, UpdateSubmitted};
     use slot_twap_oracle::math::compute_swap;
     use slot_twap_oracle::state::{ObservationBuffer, Oracle};
     use slot_twap_oracle::utils::get_observation_before_slot;
@@ -1546,5 +1550,176 @@ mod tests {
             let buffer = deserialize_observation_buffer(&svm, &obs_pda);
             assert_eq!(buffer.observations.len(), 2, "Pair {} should have 2 observations", i);
         }
+    }
+
+    // ── Reward tracking / event tests ──
+
+    /// Helper: warp, send update_price, and return TransactionMetadata for log inspection.
+    fn do_update_price_with_meta(
+        svm: &mut LiteSVM,
+        payer: &Keypair,
+        oracle_pda: &Pubkey,
+        new_price: u128,
+        target_slot: u64,
+    ) -> TransactionMetadata {
+        svm.warp_to_slot(target_slot);
+        svm.expire_blockhash();
+        let ix = build_update_price_ix(&payer.pubkey(), oracle_pda, new_price);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[payer],
+            blockhash,
+        );
+        svm.send_transaction(tx).expect("update_price failed")
+    }
+
+    /// Extract Anchor event data blobs from transaction logs.
+    ///
+    /// Anchor's `emit!()` writes events via `sol_log_data`, which the runtime
+    /// surfaces as `"Program data: <base64>"` log lines. Each blob starts with
+    /// the 8-byte event discriminator followed by the borsh payload.
+    fn extract_anchor_events(meta: &TransactionMetadata) -> Vec<Vec<u8>> {
+        let engine = base64::engine::general_purpose::STANDARD;
+        let mut events = Vec::new();
+        for log in &meta.logs {
+            if let Some(b64) = log.strip_prefix("Program data: ") {
+                if let Ok(data) = engine.decode(b64) {
+                    if data.len() >= 8 {
+                        events.push(data);
+                    }
+                }
+            }
+        }
+        events
+    }
+
+    /// Decode a specific Anchor event from raw log data (discriminator + borsh payload).
+    fn decode_event<T: AnchorDeserialize + Discriminator>(data: &[u8]) -> Option<T> {
+        let disc = T::DISCRIMINATOR;
+        if data.len() < disc.len() || data[..disc.len()] != *disc {
+            return None;
+        }
+        T::deserialize(&mut &data[disc.len()..]).ok()
+    }
+
+    #[test]
+    fn test_last_updater_set_on_update() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        let updater = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&updater.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Before any update, last_updater is default (zeroed)
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_updater, Pubkey::default());
+
+        // Update from updater — last_updater should be set
+        do_update_price(&mut svm, &updater, &oracle_pda, 500, init_slot + 10);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_updater, updater.pubkey());
+    }
+
+    #[test]
+    fn test_last_updater_tracks_most_recent_signer() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        let signer_a = Keypair::new();
+        let signer_b = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&signer_a.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&signer_b.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // A updates
+        do_update_price(&mut svm, &signer_a, &oracle_pda, 100, init_slot + 10);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_updater, signer_a.pubkey());
+
+        // B updates — last_updater flips to B
+        do_update_price(&mut svm, &signer_b, &oracle_pda, 200, init_slot + 20);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_updater, signer_b.pubkey());
+    }
+
+    #[test]
+    fn test_update_submitted_event_emitted() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        let price = 42_000u128;
+        let target_slot = init_slot + 10;
+        let meta = do_update_price_with_meta(
+            &mut svm, &payer, &oracle_pda, price, target_slot,
+        );
+
+        let events = extract_anchor_events(&meta);
+        let submitted: Vec<UpdateSubmitted> = events
+            .iter()
+            .filter_map(|e| decode_event::<UpdateSubmitted>(e))
+            .collect();
+
+        assert_eq!(submitted.len(), 1, "Expected exactly one UpdateSubmitted event");
+        assert_eq!(submitted[0].updater, payer.pubkey());
+        assert_eq!(submitted[0].slot, target_slot);
+        assert_eq!(submitted[0].price, price);
+    }
+
+    #[test]
+    fn test_price_updated_and_update_submitted_consistent() {
+        let mut svm = setup();
+        let payer = Keypair::new();
+        svm.airdrop(&payer.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &payer);
+        let quote_mint = create_mint(&mut svm, &payer);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &payer, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        let price = 7_777u128;
+        let target_slot = init_slot + 5;
+        let meta = do_update_price_with_meta(
+            &mut svm, &payer, &oracle_pda, price, target_slot,
+        );
+
+        let events = extract_anchor_events(&meta);
+
+        let price_updated: Vec<PriceUpdated> = events
+            .iter()
+            .filter_map(|e| decode_event::<PriceUpdated>(e))
+            .collect();
+        let update_submitted: Vec<UpdateSubmitted> = events
+            .iter()
+            .filter_map(|e| decode_event::<UpdateSubmitted>(e))
+            .collect();
+
+        assert_eq!(price_updated.len(), 1);
+        assert_eq!(update_submitted.len(), 1);
+
+        // Both events report the same slot and price
+        assert_eq!(price_updated[0].slot, update_submitted[0].slot);
+        assert_eq!(price_updated[0].new_price, update_submitted[0].price);
+
+        // Values match what we sent
+        assert_eq!(price_updated[0].slot, target_slot);
+        assert_eq!(price_updated[0].new_price, price);
+        assert_eq!(update_submitted[0].updater, payer.pubkey());
     }
 }

@@ -12,4 +12,5 @@ litesvm = "0.6"
 solana-sdk = "2.2"
 anchor-lang = "0.31.1"
 spl-token-2022 = "6"
+base64 = "0.22"
 slot_twap_oracle = { path = "../programs/slot_twap_oracle", features = ["no-entrypoint"] }

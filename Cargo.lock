@@ -2693,6 +2693,7 @@ name = "slot_twap_oracle_tests"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "base64 0.22.1",
  "litesvm",
  "slot_twap_oracle",
  "solana-sdk",
