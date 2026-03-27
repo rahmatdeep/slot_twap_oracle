@@ -27,6 +27,8 @@ pub fn handler(ctx: Context<GetSwap>, window_slots: u64, max_staleness_slots: u6
     let clock = Clock::get()?;
     let current_slot = clock.slot;
 
+    require!(!oracle.paused, OracleError::OraclePaused);
+
     let len = buffer.observations.len();
     require!(len > 0, OracleError::InsufficientHistory);
 

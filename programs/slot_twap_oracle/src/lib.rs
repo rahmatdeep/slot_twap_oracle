@@ -33,4 +33,8 @@ pub mod slot_twap_oracle {
     pub fn transfer_ownership(ctx: Context<TransferOwnership>) -> Result<()> {
         instructions::transfer_ownership::handler(ctx)
     }
+
+    pub fn set_paused(ctx: Context<SetPaused>, paused: bool) -> Result<()> {
+        instructions::set_paused::handler(ctx, paused)
+    }
 }

@@ -38,6 +38,7 @@ pub fn handler(ctx: Context<UpdatePrice>, new_price: u128) -> Result<()> {
         .checked_sub(oracle.last_slot)
         .ok_or(OracleError::PriceOverflow)?;
 
+    require!(!oracle.paused, OracleError::OraclePaused);
     require!(slot_delta > 0, OracleError::StaleSlot);
 
     // Reject prices that deviate more than MAX_PRICE_DEVIATION_BPS from the

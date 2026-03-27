@@ -1965,4 +1965,208 @@ mod tests {
         let result = svm.send_transaction(tx);
         assert_anchor_error(&result, OracleError::Unauthorized);
     }
+
+    // ── Pause/unpause tests ──
+
+    fn build_set_paused_ix(
+        oracle: &Pubkey,
+        owner: &Pubkey,
+        paused: bool,
+    ) -> Instruction {
+        let data = slot_twap_oracle::instruction::SetPaused { paused }.data();
+
+        Instruction {
+            program_id: program_id(),
+            accounts: vec![
+                AccountMeta::new(*oracle, false),
+                AccountMeta::new_readonly(*owner, true),
+            ],
+            data,
+        }
+    }
+
+    #[test]
+    fn test_pause_and_unpause_oracle() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, _) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Initially not paused
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert!(!oracle.paused);
+
+        // Pause
+        let ix = build_set_paused_ix(&oracle_pda, &owner.pubkey(), true);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert!(oracle.paused);
+
+        // Unpause
+        let ix = build_set_paused_ix(&oracle_pda, &owner.pubkey(), false);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert!(!oracle.paused);
+    }
+
+    #[test]
+    fn test_pause_blocks_update_price() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Pause the oracle
+        let ix = build_set_paused_ix(&oracle_pda, &owner.pubkey(), true);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+
+        // update_price should fail
+        svm.warp_to_slot(init_slot + 10);
+        svm.expire_blockhash();
+        let ix = build_update_price_ix(&owner.pubkey(), &oracle_pda, 1000);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        let result = svm.send_transaction(tx);
+        assert_anchor_error(&result, OracleError::OraclePaused);
+    }
+
+    #[test]
+    fn test_pause_blocks_get_swap() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Add an observation so get_swap would otherwise succeed
+        do_update_price(&mut svm, &owner, &oracle_pda, 1000, init_slot + 10);
+
+        // Pause
+        let ix = build_set_paused_ix(&oracle_pda, &owner.pubkey(), true);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+
+        // get_swap should fail
+        let ix = build_get_swap_ix(&oracle_pda, 5, DEFAULT_MAX_STALENESS);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        let result = svm.send_transaction(tx);
+        assert_anchor_error(&result, OracleError::OraclePaused);
+    }
+
+    #[test]
+    fn test_non_owner_cannot_pause() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        let attacker = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+        svm.airdrop(&attacker.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, _) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Non-owner tries to pause
+        let ix = build_set_paused_ix(&oracle_pda, &attacker.pubkey(), true);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&attacker.pubkey()),
+            &[&attacker],
+            blockhash,
+        );
+        let result = svm.send_transaction(tx);
+        assert!(result.is_err(), "Non-owner should not be able to pause");
+
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert!(!oracle.paused);
+    }
+
+    #[test]
+    fn test_unpause_allows_updates_again() {
+        let mut svm = setup();
+        let owner = Keypair::new();
+        svm.airdrop(&owner.pubkey(), 10_000_000_000).unwrap();
+
+        let base_mint = create_mint(&mut svm, &owner);
+        let quote_mint = create_mint(&mut svm, &owner);
+        let (oracle_pda, init_slot) =
+            init_oracle(&mut svm, &owner, &base_mint, &quote_mint, DEFAULT_CAPACITY);
+
+        // Pause
+        let ix = build_set_paused_ix(&oracle_pda, &owner.pubkey(), true);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+
+        // Unpause
+        let ix = build_set_paused_ix(&oracle_pda, &owner.pubkey(), false);
+        let blockhash = svm.latest_blockhash();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&owner.pubkey()),
+            &[&owner],
+            blockhash,
+        );
+        svm.send_transaction(tx).unwrap();
+
+        // update_price should work again
+        do_update_price(&mut svm, &owner, &oracle_pda, 1000, init_slot + 10);
+        let oracle = deserialize_oracle(&svm, &oracle_pda);
+        assert_eq!(oracle.last_price, 1000);
+    }
 }

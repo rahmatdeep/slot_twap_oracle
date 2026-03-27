@@ -15,3 +15,9 @@ pub struct OwnershipTransferred {
     pub previous_owner: Pubkey,
     pub new_owner: Pubkey,
 }
+
+#[event]
+pub struct OraclePauseToggled {
+    pub oracle: Pubkey,
+    pub paused: bool,
+}

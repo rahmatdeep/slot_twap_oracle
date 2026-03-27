@@ -89,6 +89,21 @@ export class SlotTwapOracleClient {
       .rpc();
   }
 
+  async setPaused(
+    oracle: PublicKey,
+    paused: boolean,
+    owner: Signer
+  ): Promise<string> {
+    return this.program.methods
+      .setPaused(paused)
+      .accounts({
+        oracle,
+        owner: owner.publicKey,
+      })
+      .signers([owner])
+      .rpc();
+  }
+
   async getSwap(oracle: PublicKey, windowSlots: BN, maxStalenessSlots: BN): Promise<BN> {
     const [observationBuffer] = this.findObservationBufferPda(oracle);
 

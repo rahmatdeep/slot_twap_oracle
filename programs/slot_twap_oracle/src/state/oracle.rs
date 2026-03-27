@@ -10,4 +10,5 @@ pub struct Oracle {
     pub cumulative_price: u128,
     pub last_slot: u64,
     pub last_updater: Pubkey,
+    pub paused: bool,
 }

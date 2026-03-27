@@ -22,4 +22,7 @@ pub enum OracleError {
 
     #[msg("Signer is not the oracle owner")]
     Unauthorized,
+
+    #[msg("Oracle is paused")]
+    OraclePaused,
 }

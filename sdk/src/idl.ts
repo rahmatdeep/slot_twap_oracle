@@ -98,6 +98,15 @@ export type SlotTwapOracle = {
         { name: "newOwner" }
       ];
       args: [];
+    },
+    {
+      name: "setPaused";
+      discriminator: [91, 60, 125, 192, 176, 225, 166, 218];
+      accounts: [
+        { name: "oracle"; writable: true },
+        { name: "owner"; signer: true }
+      ];
+      args: [{ name: "paused"; type: "bool" }];
     }
   ];
   accounts: [
@@ -106,7 +115,8 @@ export type SlotTwapOracle = {
   ];
   events: [
     { name: "oracleUpdate"; discriminator: [237, 176, 133, 150, 0, 131, 48, 15] },
-    { name: "ownershipTransferred"; discriminator: [172, 61, 205, 183, 250, 50, 38, 98] }
+    { name: "ownershipTransferred"; discriminator: [172, 61, 205, 183, 250, 50, 38, 98] },
+    { name: "oraclePauseToggled"; discriminator: [75, 169, 119, 212, 242, 216, 255, 126] }
   ];
   errors: [
     { code: 6000; name: "priceOverflow"; msg: "Price overflow detected" },
@@ -115,7 +125,8 @@ export type SlotTwapOracle = {
     { code: 6003; name: "invalidCapacity"; msg: "Observation buffer capacity must be greater than zero" },
     { code: 6004; name: "staleOracle"; msg: "Oracle data is stale — last update exceeds max staleness threshold" },
     { code: 6005; name: "priceDeviationTooLarge"; msg: "Price deviation from last update exceeds maximum allowed threshold" },
-    { code: 6006; name: "unauthorized"; msg: "Signer is not the oracle owner" }
+    { code: 6006; name: "unauthorized"; msg: "Signer is not the oracle owner" },
+    { code: 6007; name: "oraclePaused"; msg: "Oracle is paused" }
   ];
   types: [
     {
@@ -151,7 +162,8 @@ export type SlotTwapOracle = {
           { name: "lastPrice"; type: "u128" },
           { name: "cumulativePrice"; type: "u128" },
           { name: "lastSlot"; type: "u64" },
-          { name: "lastUpdater"; type: "pubkey" }
+          { name: "lastUpdater"; type: "pubkey" },
+          { name: "paused"; type: "bool" }
         ];
       };
     },
@@ -176,6 +188,16 @@ export type SlotTwapOracle = {
           { name: "oracle"; type: "pubkey" },
           { name: "previousOwner"; type: "pubkey" },
           { name: "newOwner"; type: "pubkey" }
+        ];
+      };
+    },
+    {
+      name: "oraclePauseToggled";
+      type: {
+        kind: "struct";
+        fields: [
+          { name: "oracle"; type: "pubkey" },
+          { name: "paused"; type: "bool" }
         ];
       };
     }
@@ -283,6 +305,15 @@ export const IDL: SlotTwapOracle = {
       ],
       args: [],
     },
+    {
+      name: "setPaused",
+      discriminator: [91, 60, 125, 192, 176, 225, 166, 218],
+      accounts: [
+        { name: "oracle", writable: true },
+        { name: "owner", signer: true },
+      ],
+      args: [{ name: "paused", type: "bool" }],
+    },
   ],
   accounts: [
     { name: "observationBuffer", discriminator: [251, 96, 31, 90, 232, 132, 250, 134] },
@@ -291,6 +322,7 @@ export const IDL: SlotTwapOracle = {
   events: [
     { name: "oracleUpdate", discriminator: [237, 176, 133, 150, 0, 131, 48, 15] },
     { name: "ownershipTransferred", discriminator: [172, 61, 205, 183, 250, 50, 38, 98] },
+    { name: "oraclePauseToggled", discriminator: [75, 169, 119, 212, 242, 216, 255, 126] },
   ],
   errors: [
     { code: 6000, name: "priceOverflow", msg: "Price overflow detected" },
@@ -300,6 +332,7 @@ export const IDL: SlotTwapOracle = {
     { code: 6004, name: "staleOracle", msg: "Oracle data is stale — last update exceeds max staleness threshold" },
     { code: 6005, name: "priceDeviationTooLarge", msg: "Price deviation from last update exceeds maximum allowed threshold" },
     { code: 6006, name: "unauthorized", msg: "Signer is not the oracle owner" },
+    { code: 6007, name: "oraclePaused", msg: "Oracle is paused" },
   ],
   types: [
     {
@@ -336,6 +369,7 @@ export const IDL: SlotTwapOracle = {
           { name: "cumulativePrice", type: "u128" },
           { name: "lastSlot", type: "u64" },
           { name: "lastUpdater", type: "pubkey" },
+          { name: "paused", type: "bool" },
         ],
       },
     },
@@ -360,6 +394,16 @@ export const IDL: SlotTwapOracle = {
           { name: "oracle", type: "pubkey" },
           { name: "previousOwner", type: "pubkey" },
           { name: "newOwner", type: "pubkey" },
+        ],
+      },
+    },
+    {
+      name: "oraclePauseToggled",
+      type: {
+        kind: "struct",
+        fields: [
+          { name: "oracle", type: "pubkey" },
+          { name: "paused", type: "bool" },
         ],
       },
     },
