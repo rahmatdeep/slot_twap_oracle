@@ -1,26 +1,20 @@
 import { AnchorProvider, BN, Wallet } from "@coral-xyz/anchor";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
-import {
-  SlotTwapOracleClient,
-} from "@slot-twap-oracle/sdk";
+import { SlotTwapOracleClient } from "@slot-twap-oracle/sdk";
 import {
   RPC_URL,
   ORACLE_PROGRAM_ID,
-  BASE_MINT,
-  QUOTE_MINT,
-  RAYDIUM_AMM_ID,
-  ORCA_WHIRLPOOL_ID,
-  METEORA_POOL_ID,
   MIN_SOURCES,
   UPDATE_INTERVAL_MS,
   loadKeypair,
+  loadPairs,
+  PairConfig,
 } from "./config";
 import { fetchPrice as fetchRaydium } from "./sources/raydium";
 import { fetchPrice as fetchOrca } from "./sources/orca";
 import { fetchPrice as fetchMeteora } from "./sources/meteora";
 
 const PRICE_DECIMALS = 9;
-
 const MAX_RETRIES = 5;
 const BASE_DELAY_MS = 1000;
 
@@ -29,39 +23,67 @@ const payer = Keypair.fromSecretKey(loadKeypair());
 const provider = new AnchorProvider(connection, new Wallet(payer), {
   commitment: "confirmed",
 });
-
 const client = new SlotTwapOracleClient(provider, ORACLE_PROGRAM_ID);
-const [oraclePda] = client.findOraclePda(BASE_MINT, QUOTE_MINT);
-const [observationBuffer] = client.findObservationBufferPda(oraclePda);
+
+type FetchFn = (conn: Connection, pool: PublicKey, baseMint: PublicKey, quoteMint: PublicKey) => Promise<number>;
 
 interface PriceSource {
   name: string;
   poolAddress: PublicKey;
-  fetch: (connection: Connection, pool: PublicKey) => Promise<number>;
+  fetch: FetchFn;
 }
 
-const sources: PriceSource[] = [];
+const FETCHERS: Record<string, FetchFn> = {
+  raydium: fetchRaydium,
+  orca: fetchOrca,
+  meteora: fetchMeteora,
+};
 
-if (RAYDIUM_AMM_ID) {
-  sources.push({ name: "Raydium", poolAddress: RAYDIUM_AMM_ID, fetch: fetchRaydium });
-}
-if (ORCA_WHIRLPOOL_ID) {
-  sources.push({ name: "Orca", poolAddress: ORCA_WHIRLPOOL_ID, fetch: fetchOrca });
-}
-if (METEORA_POOL_ID) {
-  sources.push({ name: "Meteora", poolAddress: METEORA_POOL_ID, fetch: fetchMeteora });
-}
-
-if (sources.length < MIN_SOURCES) {
-  throw new Error(
-    `At least ${MIN_SOURCES} price sources must be configured, but only ${sources.length} found. ` +
-      `Set RAYDIUM_AMM_ID, ORCA_WHIRLPOOL_ID, and/or METEORA_POOL_ID in .env`
-  );
+interface Pair {
+  name: string;
+  oracle: PublicKey;
+  baseMint: PublicKey;
+  quoteMint: PublicKey;
+  sources: PriceSource[];
 }
 
-console.log(`[updater] Oracle PDA: ${oraclePda.toBase58()}`);
-console.log(`[updater] Observation buffer: ${observationBuffer.toBase58()}`);
-console.log(`[updater] Price sources: ${sources.map((s) => s.name).join(", ")}`);
+function buildPairs(configs: PairConfig[]): Pair[] {
+  return configs.map((cfg) => {
+    const sources: PriceSource[] = [];
+    for (const [key, address] of Object.entries(cfg.sources)) {
+      const fetcher = FETCHERS[key];
+      if (!fetcher) {
+        throw new Error(`[${cfg.name}] Unknown source "${key}". Valid: ${Object.keys(FETCHERS).join(", ")}`);
+      }
+      if (address) {
+        sources.push({
+          name: key,
+          poolAddress: new PublicKey(address),
+          fetch: fetcher,
+        });
+      }
+    }
+    if (sources.length < MIN_SOURCES) {
+      throw new Error(
+        `[${cfg.name}] Needs >= ${MIN_SOURCES} sources, but only ${sources.length} configured`
+      );
+    }
+    return {
+      name: cfg.name,
+      oracle: new PublicKey(cfg.oracle),
+      baseMint: new PublicKey(cfg.baseMint),
+      quoteMint: new PublicKey(cfg.quoteMint),
+      sources,
+    };
+  });
+}
+
+const pairs = buildPairs(loadPairs());
+
+console.log(`[updater] Loaded ${pairs.length} pair(s)`);
+for (const pair of pairs) {
+  console.log(`[updater]   ${pair.name}: oracle=${pair.oracle.toBase58()}, sources=${pair.sources.map((s) => s.name).join(", ")}`);
+}
 console.log(`[updater] Min required sources: ${MIN_SOURCES}`);
 console.log(`[updater] Update interval: ${UPDATE_INTERVAL_MS / 1000}s`);
 
@@ -74,7 +96,7 @@ function median(values: number[]): number {
   return sorted[mid];
 }
 
-async function retryWithBackoff<T>(fn: () => Promise<T>): Promise<T> {
+async function retryWithBackoff<T>(fn: () => Promise<T>, label: string): Promise<T> {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       return await fn();
@@ -84,7 +106,7 @@ async function retryWithBackoff<T>(fn: () => Promise<T>): Promise<T> {
 
       const delayMs = BASE_DELAY_MS * 2 ** attempt;
       console.warn(
-        `[updater] Attempt ${attempt + 1}/${MAX_RETRIES} failed: ${(err as Error).message}. ` +
+        `[${label}] Attempt ${attempt + 1}/${MAX_RETRIES} failed: ${(err as Error).message}. ` +
           `Retrying in ${delayMs / 1000}s...`
       );
       await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -93,11 +115,11 @@ async function retryWithBackoff<T>(fn: () => Promise<T>): Promise<T> {
   throw new Error("unreachable");
 }
 
-async function fetchAllPrices(): Promise<number[]> {
+async function fetchPricesForPair(pair: Pair): Promise<number[]> {
   const results = await Promise.allSettled(
-    sources.map(async (source) => {
-      const price = await source.fetch(connection, source.poolAddress);
-      console.log(`[updater]   ${source.name}: ${price}`);
+    pair.sources.map(async (source) => {
+      const price = await source.fetch(connection, source.poolAddress, pair.baseMint, pair.quoteMint);
+      console.log(`[${pair.name}]   ${source.name}: ${price}`);
       return price;
     })
   );
@@ -109,53 +131,58 @@ async function fetchAllPrices(): Promise<number[]> {
       prices.push(result.value);
     } else {
       console.warn(
-        `[updater]   ${sources[i].name}: FAILED - ${result.reason?.message ?? result.reason}`
+        `[${pair.name}]   ${pair.sources[i].name}: FAILED - ${result.reason?.message ?? result.reason}`
       );
     }
   }
-
   return prices;
 }
 
 function toScaledBigint(price: number): bigint {
-  // Scale float to integer with PRICE_DECIMALS precision
   return BigInt(Math.round(price * 10 ** PRICE_DECIMALS));
 }
 
+async function updatePair(pair: Pair): Promise<void> {
+  console.log(`[${pair.name}] Fetching prices...`);
+  const prices = await fetchPricesForPair(pair);
+
+  if (prices.length < MIN_SOURCES) {
+    console.warn(
+      `[${pair.name}] Only ${prices.length}/${pair.sources.length} sources ` +
+        `(need >= ${MIN_SOURCES}). Skipping.`
+    );
+    return;
+  }
+
+  const medianPrice = median(prices);
+  const scaledPrice = toScaledBigint(medianPrice);
+
+  console.log(
+    `[${pair.name}] Median: ${medianPrice} (${prices.length} sources) -> scaled: ${scaledPrice}`
+  );
+
+  const sig = await retryWithBackoff(
+    () => client.updatePrice(pair.oracle, new BN(scaledPrice.toString()), payer),
+    pair.name
+  );
+  console.log(`[${pair.name}] update_price tx: ${sig}`);
+}
+
 async function tick(): Promise<void> {
-  try {
-    console.log("[updater] Fetching prices...");
-    const prices = await fetchAllPrices();
+  const results = await Promise.allSettled(pairs.map((pair) => updatePair(pair)));
 
-    if (prices.length < MIN_SOURCES) {
-      console.warn(
-        `[updater] Only ${prices.length}/${sources.length} sources returned a price ` +
-          `(need >= ${MIN_SOURCES}). Skipping update.`
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result.status === "rejected") {
+      console.error(
+        `[${pairs[i].name}] Failed after ${MAX_RETRIES} retries: ${result.reason?.message ?? result.reason}`
       );
-      return;
     }
-
-    const medianPrice = median(prices);
-    const scaledPrice = toScaledBigint(medianPrice);
-
-    console.log(
-      `[updater] Median price: ${medianPrice} (${prices.length} sources) -> scaled: ${scaledPrice}`
-    );
-
-    const sig = await retryWithBackoff(() =>
-      client.updatePrice(oraclePda, new BN(scaledPrice.toString()), payer)
-    );
-    console.log(`[updater] update_price tx: ${sig}`);
-  } catch (err) {
-    console.error(
-      `[updater] Failed after ${MAX_RETRIES} retries: ${(err as Error).message}`
-    );
   }
 }
 
 async function main(): Promise<void> {
   console.log("[updater] Starting updater bot...");
-
   await tick();
   setInterval(tick, UPDATE_INTERVAL_MS);
 }

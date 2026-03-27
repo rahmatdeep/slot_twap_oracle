@@ -6,21 +6,32 @@ const METEORA_DLMM_PROGRAM_ID = new PublicKey(
 );
 
 // Meteora DLMM LbPair account layout offsets (after 8-byte Anchor discriminator).
-// StaticParameters (30 bytes) + VariableParameters (32 bytes) + misc fields,
-// then: token_x_mint at 88, token_y_mint at 120, reserve_x at 152, reserve_y at 184.
+// token_x_mint at 88, token_y_mint at 120, reserve_x at 152, reserve_y at 184.
 const LB_PAIR_MIN_SIZE = 216;
+const MINT_X_OFFSET = 88;
+const MINT_Y_OFFSET = 120;
 const RESERVE_X_OFFSET = 152;
 const RESERVE_Y_OFFSET = 184;
 
+function computePrice(numerator: BN, denominator: BN): number {
+  if (denominator.isZero()) {
+    throw new Error("Meteora: denominator reserve is zero");
+  }
+  const SCALE = new BN(10).pow(new BN(18));
+  const scaled = numerator.mul(SCALE).div(denominator);
+  return Number(scaled.toString()) / 1e18;
+}
+
 /**
  * Fetches the spot price from a Meteora DLMM pool.
- * Reads reserve token balances and returns price as quote / base (floating point).
- *
- * Assumes token X is the base token and token Y is the quote token.
+ * Validates that pool mints match the oracle's base/quote mints.
+ * If the pool token ordering is reversed, the price is inverted.
  */
 export async function fetchPrice(
   connection: Connection,
-  poolAddress: PublicKey
+  poolAddress: PublicKey,
+  baseMint: PublicKey,
+  quoteMint: PublicKey
 ): Promise<number> {
   const poolAccount = await connection.getAccountInfo(poolAddress);
   if (!poolAccount)
@@ -39,12 +50,21 @@ export async function fetchPrice(
   }
 
   const data = poolAccount.data;
-  const reserveX = new PublicKey(
-    data.subarray(RESERVE_X_OFFSET, RESERVE_X_OFFSET + 32)
-  );
-  const reserveY = new PublicKey(
-    data.subarray(RESERVE_Y_OFFSET, RESERVE_Y_OFFSET + 32)
-  );
+  const mintX = new PublicKey(data.subarray(MINT_X_OFFSET, MINT_X_OFFSET + 32));
+  const mintY = new PublicKey(data.subarray(MINT_Y_OFFSET, MINT_Y_OFFSET + 32));
+
+  const forward = mintX.equals(baseMint) && mintY.equals(quoteMint);
+  const reversed = mintX.equals(quoteMint) && mintY.equals(baseMint);
+
+  if (!forward && !reversed) {
+    throw new Error(
+      `Meteora: pool mints (${mintX.toBase58()}, ${mintY.toBase58()}) ` +
+        `do not match oracle mints (${baseMint.toBase58()}, ${quoteMint.toBase58()})`
+    );
+  }
+
+  const reserveX = new PublicKey(data.subarray(RESERVE_X_OFFSET, RESERVE_X_OFFSET + 32));
+  const reserveY = new PublicKey(data.subarray(RESERVE_Y_OFFSET, RESERVE_Y_OFFSET + 32));
 
   const [balanceX, balanceY] = await Promise.all([
     connection.getTokenAccountBalance(reserveX),
@@ -54,11 +74,7 @@ export async function fetchPrice(
   const amountX = new BN(balanceX.value.amount);
   const amountY = new BN(balanceY.value.amount);
 
-  if (amountX.isZero()) {
-    throw new Error("Meteora: base reserve (token X) is zero");
-  }
-
-  const SCALE = new BN(10).pow(new BN(18));
-  const scaled = amountY.mul(SCALE).div(amountX);
-  return Number(scaled.toString()) / 1e18;
+  // price = Y / X in pool terms
+  const rawPrice = computePrice(amountY, amountX);
+  return reversed ? 1 / rawPrice : rawPrice;
 }

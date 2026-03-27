@@ -17,17 +17,6 @@ export const KEYPAIR_PATH = requireEnv("KEYPAIR_PATH").replace(
   process.env.HOME || ""
 );
 export const ORACLE_PROGRAM_ID = new PublicKey(requireEnv("ORACLE_PROGRAM_ID"));
-export const BASE_MINT = new PublicKey(requireEnv("BASE_MINT"));
-export const QUOTE_MINT = new PublicKey(requireEnv("QUOTE_MINT"));
-function optionalPubkey(key: string): PublicKey | null {
-  const val = process.env[key];
-  if (!val) return null;
-  return new PublicKey(val);
-}
-
-export const RAYDIUM_AMM_ID = optionalPubkey("RAYDIUM_AMM_ID");
-export const ORCA_WHIRLPOOL_ID = optionalPubkey("ORCA_WHIRLPOOL_ID");
-export const METEORA_POOL_ID = optionalPubkey("METEORA_POOL_ID");
 
 export const MIN_SOURCES = parseInt(process.env.MIN_SOURCES || "2", 10);
 
@@ -35,6 +24,44 @@ export const UPDATE_INTERVAL_MS = parseInt(
   process.env.UPDATE_INTERVAL_MS || "30000",
   10
 );
+
+export const PAIRS_CONFIG_PATH = process.env.PAIRS_CONFIG_PATH
+  || path.resolve(__dirname, "../config/pairs.json");
+
+export interface PairConfig {
+  name: string;
+  oracle: string;
+  baseMint: string;
+  quoteMint: string;
+  sources: {
+    raydium?: string;
+    orca?: string;
+    meteora?: string;
+  };
+}
+
+export function loadPairs(): PairConfig[] {
+  if (!fs.existsSync(PAIRS_CONFIG_PATH)) {
+    throw new Error(`Pairs config not found: ${PAIRS_CONFIG_PATH}`);
+  }
+
+  const raw = fs.readFileSync(PAIRS_CONFIG_PATH, "utf-8");
+  const pairs: PairConfig[] = JSON.parse(raw);
+
+  if (!Array.isArray(pairs) || pairs.length === 0) {
+    throw new Error("Pairs config must be a non-empty JSON array");
+  }
+
+  for (const pair of pairs) {
+    if (!pair.name || !pair.oracle || !pair.baseMint || !pair.quoteMint || !pair.sources) {
+      throw new Error(
+        `Invalid pair config: each entry must have name, oracle, baseMint, quoteMint, and sources`
+      );
+    }
+  }
+
+  return pairs;
+}
 
 export function loadKeypairFromFile(filePath: string): Uint8Array {
   if (!fs.existsSync(filePath)) {

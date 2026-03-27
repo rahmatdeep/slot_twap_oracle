@@ -1,0 +1,23 @@
+[
+  {
+    "name": "SOL/USDC",
+    "oracle": "ORACLE_PDA_PUBKEY",
+    "baseMint": "So11111111111111111111111111111111111111112",
+    "quoteMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "sources": {
+      "raydium": "RAYDIUM_AMM_POOL_ADDRESS",
+      "orca": "ORCA_WHIRLPOOL_ADDRESS",
+      "meteora": "METEORA_DLMM_ADDRESS"
+    }
+  },
+  {
+    "name": "ETH/USDC",
+    "oracle": "ORACLE_PDA_PUBKEY",
+    "baseMint": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+    "quoteMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "sources": {
+      "raydium": "RAYDIUM_AMM_POOL_ADDRESS",
+      "orca": "ORCA_WHIRLPOOL_ADDRESS"
+    }
+  }
+]
