@@ -11,6 +11,7 @@ export {
   ObservationBufferAccount,
   Observation,
   OracleUpdateEvent,
+  RewardClaimedEvent,
 } from "./types";
 export { IDL } from "./idl";
 export type { SlotTwapOracle } from "./idl";

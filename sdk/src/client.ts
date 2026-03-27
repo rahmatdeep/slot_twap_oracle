@@ -13,6 +13,7 @@ import {
   ObservationBufferAccount,
   Observation,
   OracleUpdateEvent,
+  RewardClaimedEvent,
 } from "./types";
 
 /**
@@ -455,6 +456,84 @@ export class SlotTwapOracleClient {
       const updater = new PublicKey(payload.subarray(offset, offset + 32));
 
       events.push({ oracle, price, cumulativePrice, slot, updater });
+    }
+
+    return events;
+  }
+
+  // ── Reward event parsing ──
+
+  static decodeRewardClaimedLogs(logs: string[]): RewardClaimedEvent[] {
+    const DISCRIMINATOR = Buffer.from([49, 28, 87, 84, 158, 48, 229, 175]);
+    const events: RewardClaimedEvent[] = [];
+
+    for (const line of logs) {
+      if (!line.startsWith("Program data: ")) continue;
+
+      const b64 = line.slice("Program data: ".length);
+      let data: Buffer;
+      try {
+        data = Buffer.from(b64, "base64");
+      } catch {
+        continue;
+      }
+
+      if (data.length < 8 || !data.subarray(0, 8).equals(DISCRIMINATOR)) {
+        continue;
+      }
+
+      // Layout: oracle (32) + updater (32) + amount (8) + total_distributed (8)
+      const payload = data.subarray(8);
+      if (payload.length < 80) continue;
+
+      let offset = 0;
+      const oracle = new PublicKey(payload.subarray(offset, offset + 32));
+      offset += 32;
+
+      const updater = new PublicKey(payload.subarray(offset, offset + 32));
+      offset += 32;
+
+      const amount = new BN(payload.subarray(offset, offset + 8), "le");
+      offset += 8;
+
+      const totalDistributed = new BN(payload.subarray(offset, offset + 8), "le");
+
+      events.push({ oracle, updater, amount, totalDistributed });
+    }
+
+    return events;
+  }
+
+  async parseRewardClaimedEvents(txSignature: string): Promise<RewardClaimedEvent[]> {
+    const tx = await this.program.provider.connection.getTransaction(
+      txSignature,
+      { maxSupportedTransactionVersion: 0 }
+    );
+    if (!tx?.meta?.logMessages) return [];
+    return SlotTwapOracleClient.decodeRewardClaimedLogs(tx.meta.logMessages);
+  }
+
+  async getRewardVaultEvents(
+    oraclePubkey: PublicKey,
+    limit: number = 20
+  ): Promise<RewardClaimedEvent[]> {
+    const [rewardVault] = this.findRewardVaultPda(oraclePubkey);
+    const conn = this.program.provider.connection;
+
+    const signatures = await conn.getSignaturesForAddress(rewardVault, { limit });
+    if (signatures.length === 0) return [];
+
+    const txs = await conn.getTransactions(
+      signatures.map((s) => s.signature),
+      { maxSupportedTransactionVersion: 0 }
+    );
+
+    const events: RewardClaimedEvent[] = [];
+    for (const tx of txs) {
+      if (!tx?.meta?.logMessages) continue;
+      events.push(
+        ...SlotTwapOracleClient.decodeRewardClaimedLogs(tx.meta.logMessages)
+      );
     }
 
     return events;

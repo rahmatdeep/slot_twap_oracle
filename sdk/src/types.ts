@@ -33,3 +33,10 @@ export interface OracleUpdateEvent {
   slot: BN;
   updater: PublicKey;
 }
+
+export interface RewardClaimedEvent {
+  oracle: PublicKey;
+  updater: PublicKey;
+  amount: BN;
+  totalDistributed: BN;
+}
