@@ -133,13 +133,20 @@ mod tests {
     ) -> Instruction {
         let (obs_pda, _) = observation_buffer_pda(oracle);
         let data = slot_twap_oracle::instruction::UpdatePrice { new_price }.data();
+        let pid = program_id();
 
         Instruction {
-            program_id: program_id(),
+            program_id: pid,
             accounts: vec![
                 AccountMeta::new_readonly(*payer, true),
                 AccountMeta::new(*oracle, false),
                 AccountMeta::new(obs_pda, false),
+                // Optional reward accounts — pass program ID as None placeholder
+                AccountMeta::new_readonly(pid, false), // reward_vault
+                AccountMeta::new_readonly(pid, false), // vault_token_account
+                AccountMeta::new_readonly(pid, false), // reward_mint
+                AccountMeta::new_readonly(pid, false), // previous_updater_token_account
+                AccountMeta::new_readonly(pid, false), // token_program
             ],
             data,
         }
