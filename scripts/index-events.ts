@@ -62,6 +62,10 @@ async function initDb(pool: Pool): Promise<void> {
   await pool.query(
     `CREATE INDEX IF NOT EXISTS idx_oracle_updates_slot ON oracle_updates (slot DESC)`
   );
+  await pool.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_oracle_updates_slot_oracle
+     ON oracle_updates (slot, oracle_pubkey)`
+  );
 }
 
 // ── Stream handler ──
