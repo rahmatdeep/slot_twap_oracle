@@ -34,6 +34,7 @@ pub struct WithdrawRewardVault<'info> {
     #[account(
         mut,
         token::mint = reward_vault.reward_mint,
+        constraint = owner_token_account.key() != vault_token_account.key(),
     )]
     pub owner_token_account: InterfaceAccount<'info, TokenAccount>,
 

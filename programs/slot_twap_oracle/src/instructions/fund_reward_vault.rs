@@ -34,6 +34,7 @@ pub struct FundRewardVault<'info> {
     #[account(
         mut,
         token::mint = reward_vault.reward_mint,
+        constraint = funder_token_account.key() != vault_token_account.key(),
     )]
     pub funder_token_account: InterfaceAccount<'info, TokenAccount>,
 
