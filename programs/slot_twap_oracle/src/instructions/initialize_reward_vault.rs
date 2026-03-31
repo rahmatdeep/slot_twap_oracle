@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
+use crate::errors::OracleError;
 use crate::state::{Oracle, RewardVault};
 
 #[derive(Accounts)]
@@ -42,6 +43,18 @@ pub struct InitializeRewardVault<'info> {
 }
 
 pub fn handler(ctx: Context<InitializeRewardVault>, reward_per_update: u64) -> Result<()> {
+    require!(reward_per_update > 0, OracleError::InvalidCapacity);
+
+    // §23: Reject Token-2022 mints with dangerous extensions.
+    // Standard SPL Token mints are 82 bytes. Token-2022 mints with extensions
+    // are larger. A mint with PermanentDelegate (allows seizing vault tokens)
+    // or FreezeAuthority (allows freezing vault) is dangerous.
+    // We reject mints > 170 bytes as a conservative heuristic — basic Token-2022
+    // mints without extensions are 82 bytes, mints with simple extensions are
+    // ~130-170 bytes. Mints with PermanentDelegate/TransferHook are larger.
+    let mint_data_len = ctx.accounts.reward_mint.to_account_info().data_len();
+    require!(mint_data_len <= 170, OracleError::InvalidCapacity);
+
     let vault = &mut ctx.accounts.reward_vault;
     vault.oracle = ctx.accounts.oracle.key();
     vault.reward_mint = ctx.accounts.reward_mint.key();
