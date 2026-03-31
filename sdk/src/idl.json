@@ -8,6 +8,55 @@
   },
   "instructions": [
     {
+      "name": "accept_ownership",
+      "discriminator": [
+        172,
+        23,
+        43,
+        13,
+        238,
+        213,
+        85,
+        150
+      ],
+      "accounts": [
+        {
+          "name": "oracle",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  97,
+                  99,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "oracle.base_mint",
+                "account": "Oracle"
+              },
+              {
+                "kind": "account",
+                "path": "oracle.quote_mint",
+                "account": "Oracle"
+              }
+            ]
+          }
+        },
+        {
+          "name": "new_owner",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "fund_reward_vault",
       "discriminator": [
         9,
@@ -844,6 +893,128 @@
           "type": "u128"
         }
       ]
+    },
+    {
+      "name": "withdraw_reward_vault",
+      "discriminator": [
+        51,
+        215,
+        210,
+        216,
+        228,
+        21,
+        214,
+        156
+      ],
+      "accounts": [
+        {
+          "name": "oracle",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  97,
+                  99,
+                  108,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "oracle.base_mint",
+                "account": "Oracle"
+              },
+              {
+                "kind": "account",
+                "path": "oracle.quote_mint",
+                "account": "Oracle"
+              }
+            ]
+          },
+          "relations": [
+            "reward_vault"
+          ]
+        },
+        {
+          "name": "reward_vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  119,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "oracle"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  119,
+                  97,
+                  114,
+                  100,
+                  95,
+                  116,
+                  111,
+                  107,
+                  101,
+                  110,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "oracle"
+              }
+            ]
+          }
+        },
+        {
+          "name": "reward_mint"
+        },
+        {
+          "name": "owner_token_account",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "oracle"
+          ]
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -1158,6 +1329,10 @@
           {
             "name": "max_deviation_bps",
             "type": "u16"
+          },
+          {
+            "name": "pending_owner",
+            "type": "pubkey"
           }
         ]
       }
@@ -1285,6 +1460,13 @@
               "Slot of the last rewarded update — prevents double-pay."
             ],
             "type": "u64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Cached PDA bump for efficient CPI signing."
+            ],
+            "type": "u8"
           }
         ]
       }
